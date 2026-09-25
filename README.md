@@ -11,15 +11,6 @@
 ![Railway](https://img.shields.io/badge/deploy-Railway-7B61FF)
 ![AWS](https://img.shields.io/badge/deploy-AWS%20App%20Runner-FF9900)
 ![GCP](https://img.shields.io/badge/deploy-GCP%20Cloud%20Run-4285F4)
-
-**The ultra-light Python LLM gateway for teams that want one fast, self-hosted control plane for every model.**
-
-`justfastllm` gives you a centralized API gateway for routing requests to OpenAI, Anthropic, DeepSeek, Grok, Qwen, Kimi, Ollama, and any OpenAI-compatible provider without provider SDKs in the runtime path. It is built for teams that want speed, operational control, clean abstractions, Redis-backed scale, and a deployment story that works from a laptop to cloud production.
-
-Created, built, and maintained solely by [Suhas Bhairav](https://suhasbhairav.com).
-
-## Product Chips
-
 ![LLM Gateway](https://img.shields.io/badge/LLM-Gateway-111827)
 ![Provider Proxy](https://img.shields.io/badge/Provider-Proxy-2563EB)
 ![OpenAI Compatible](https://img.shields.io/badge/OpenAI-Compatible-10A37F)
@@ -36,9 +27,6 @@ Created, built, and maintained solely by [Suhas Bhairav](https://suhasbhairav.co
 ![Skills](https://img.shields.io/badge/Skills-Ready-0891B2)
 ![OpenAPI](https://img.shields.io/badge/OpenAPI-Contract-16A34A)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED)
-
-## Deployment Chips
-
 ![Self Hosted](https://img.shields.io/badge/Self--Hosted-Ready-111827)
 ![Docker](https://img.shields.io/badge/Docker-Image-2496ED)
 ![Docker Compose](https://img.shields.io/badge/Docker%20Compose-Stack-2496ED)
@@ -47,6 +35,12 @@ Created, built, and maintained solely by [Suhas Bhairav](https://suhasbhairav.co
 ![AWS App Runner](https://img.shields.io/badge/AWS-App%20Runner-FF9900)
 ![GCP Cloud Run](https://img.shields.io/badge/GCP-Cloud%20Run-4285F4)
 ![Redis Ready](https://img.shields.io/badge/Redis-Ready-DC2626)
+
+**The ultra-light Python LLM gateway for teams that want one fast, self-hosted control plane for every model.**
+
+`justfastllm` gives you a centralized API gateway for routing requests to OpenAI, Anthropic, DeepSeek, Grok, Qwen, Kimi, Ollama, and any OpenAI-compatible provider without provider SDKs in the runtime path. It is built for teams that want speed, operational control, clean abstractions, Redis-backed scale, and a deployment story that works from a laptop to cloud production.
+
+Created, built, and maintained solely by [Suhas Bhairav](https://suhasbhairav.com).
 
 ## Why justfastllm Exists
 
