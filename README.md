@@ -20,11 +20,33 @@ Created, built, and maintained solely by [Suhas Bhairav](https://suhasbhairav.co
 
 ## Product Chips
 
-`LLM Gateway` · `Provider Proxy` · `OpenAI-Compatible` · `Anthropic Messages` · `DeepSeek` · `Grok` · `Qwen` · `Kimi` · `Ollama` · `Redis Cache` · `User Memory` · `Guardrails` · `Agents` · `Skills` · `OpenAPI` · `Docker`
+![LLM Gateway](https://img.shields.io/badge/LLM-Gateway-111827)
+![Provider Proxy](https://img.shields.io/badge/Provider-Proxy-2563EB)
+![OpenAI Compatible](https://img.shields.io/badge/OpenAI-Compatible-10A37F)
+![Anthropic Messages](https://img.shields.io/badge/Anthropic-Messages-D97706)
+![DeepSeek](https://img.shields.io/badge/DeepSeek-Provider-4F46E5)
+![Grok](https://img.shields.io/badge/Grok-xAI-000000)
+![Qwen](https://img.shields.io/badge/Qwen-Provider-1D4ED8)
+![Kimi](https://img.shields.io/badge/Kimi-Moonshot-7C3AED)
+![Ollama](https://img.shields.io/badge/Ollama-Local-111111)
+![Redis Cache](https://img.shields.io/badge/Redis-Cache-DC2626)
+![User Memory](https://img.shields.io/badge/User-Memory-0F766E)
+![Guardrails](https://img.shields.io/badge/Guardrails-Configurable-B45309)
+![Agents](https://img.shields.io/badge/Agents-Ready-4338CA)
+![Skills](https://img.shields.io/badge/Skills-Ready-0891B2)
+![OpenAPI](https://img.shields.io/badge/OpenAPI-Contract-16A34A)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED)
 
 ## Deployment Chips
 
-`Self-Hosted` · `Docker` · `Docker Compose` · `Render Blueprint` · `Railway Dockerfile` · `AWS App Runner` · `GCP Cloud Run` · `Redis Ready`
+![Self Hosted](https://img.shields.io/badge/Self--Hosted-Ready-111827)
+![Docker](https://img.shields.io/badge/Docker-Image-2496ED)
+![Docker Compose](https://img.shields.io/badge/Docker%20Compose-Stack-2496ED)
+![Render Blueprint](https://img.shields.io/badge/Render-Blueprint-46E3B7)
+![Railway Dockerfile](https://img.shields.io/badge/Railway-Dockerfile-7B61FF)
+![AWS App Runner](https://img.shields.io/badge/AWS-App%20Runner-FF9900)
+![GCP Cloud Run](https://img.shields.io/badge/GCP-Cloud%20Run-4285F4)
+![Redis Ready](https://img.shields.io/badge/Redis-Ready-DC2626)
 
 ## Why justfastllm Exists
 
