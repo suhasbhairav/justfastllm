@@ -39,10 +39,10 @@ Any OpenAI-compatible provider can be added through `.env` without code changes:
 JUSTFASTLLM_OPENAI_COMPATIBLE_PROVIDERS=openrouter
 OPENROUTER_API_KEY=...
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_DEFAULT_MODEL=openai/gpt-4.1-mini
+OPENROUTER_DEFAULT_MODEL=openai/gpt-5-nano
 ```
 
-Requests can then use `"provider": "openrouter"` or a model prefix such as `openrouter/openai/gpt-4.1-mini`.
+Requests can then use `"provider": "openrouter"` or a model prefix such as `openrouter/openai/gpt-5-nano`.
 
 ## Anthropic
 

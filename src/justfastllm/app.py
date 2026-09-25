@@ -129,14 +129,15 @@ class GatewayASGI:
             await responder.json(500, {"error": {"code": "internal_error", "message": str(exc)}})
         finally:
             elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
-            self.logger.info(
-                "request request_id=%s method=%s path=%s elapsed_ms=%s headers=%s",
-                request_id,
-                method,
-                path,
-                elapsed_ms,
-                sanitize_headers(headers),
-            )
+            if self.logger.isEnabledFor(logging.INFO):
+                self.logger.info(
+                    "request request_id=%s method=%s path=%s elapsed_ms=%s headers=%s",
+                    request_id,
+                    method,
+                    path,
+                    elapsed_ms,
+                    sanitize_headers(headers),
+                )
 
     async def _lifespan(self, receive: Receive, send: Send) -> None:
         while True:

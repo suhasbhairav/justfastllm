@@ -23,7 +23,7 @@ OpenAI-compatible chat completion proxy.
 ```json
 {
   "provider": "openai",
-  "model": "gpt-4.1-mini",
+  "model": "gpt-5-nano",
   "messages": [{"role": "user", "content": "Hello"}],
   "temperature": 0.2
 }

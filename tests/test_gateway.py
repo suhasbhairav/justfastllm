@@ -131,7 +131,16 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         request = http.requests[0]
         self.assertEqual(request.url, "https://api.openai.com/v1/chat/completions")
         self.assertEqual(request.headers["Authorization"], "Bearer openai-key")
-        self.assertEqual(loads_bytes(request.body)["model"], "gpt-4.1-mini")
+        self.assertEqual(loads_bytes(request.body)["model"], "gpt-5-nano")
+
+    async def test_openai_model_alias_is_supported(self) -> None:
+        cfg = settings(OPENAI_MODEL="gpt-5-nano").providers["openai"]
+        http = FakeHttpClient()
+        provider = OpenAICompatibleProvider(cfg, http)
+
+        await provider.chat_completion({"messages": [{"role": "user", "content": "hi"}]})
+
+        self.assertEqual(loads_bytes(http.requests[0].body)["model"], "gpt-5-nano")
 
     async def test_ollama_provider_does_not_require_auth(self) -> None:
         cfg = settings().providers["ollama"]
@@ -226,7 +235,7 @@ class FactoryAndCacheTests(unittest.TestCase):
             JUSTFASTLLM_OPENAI_COMPATIBLE_PROVIDERS="openrouter, local-ai",
             OPENROUTER_BASE_URL="https://openrouter.ai/api/v1",
             OPENROUTER_API_KEY="openrouter-key",
-            OPENROUTER_DEFAULT_MODEL="openai/gpt-4.1-mini",
+            OPENROUTER_DEFAULT_MODEL="openai/gpt-5-nano",
             LOCAL_AI_BASE_URL="http://localhost:8080/v1",
             LOCAL_AI_REQUIRES_API_KEY="false",
         )

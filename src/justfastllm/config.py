@@ -20,7 +20,7 @@ DEFAULT_BASE_URLS = {
 }
 
 DEFAULT_MODELS = {
-    "openai": "gpt-4.1-mini",
+    "openai": "gpt-5-nano",
     "anthropic": "claude-sonnet-4-5",
     "deepseek": "deepseek-chat",
     "grok": "grok-4.7",
@@ -57,6 +57,10 @@ MODEL_ENV = {
     "qwen": "QWEN_DEFAULT_MODEL",
     "kimi": "KIMI_DEFAULT_MODEL",
     "ollama": "OLLAMA_DEFAULT_MODEL",
+}
+
+MODEL_ENV_ALIASES = {
+    "openai": ("OPENAI_MODEL",),
 }
 
 OPENAI_COMPATIBLE_PROVIDER_ENV = "JUSTFASTLLM_OPENAI_COMPATIBLE_PROVIDERS"
@@ -160,7 +164,7 @@ def _load_provider_configs(get: Callable[[str, str], str], timeout: float) -> di
             name=name,
             api_key=get(API_KEY_ENV[name]),
             base_url=get(BASE_URL_ENV[name], DEFAULT_BASE_URLS[name]).rstrip("/"),
-            default_model=get(MODEL_ENV[name], DEFAULT_MODELS[name]),
+            default_model=_model_value(get, name),
             timeout_seconds=timeout,
             requires_api_key=name != "ollama",
         )
@@ -178,6 +182,14 @@ def _load_provider_configs(get: Callable[[str, str], str], timeout: float) -> di
             requires_api_key=_as_bool(get(f"{env_prefix}_REQUIRES_API_KEY", "true")),
         )
     return providers
+
+
+def _model_value(get: Callable[[str, str], str], provider_name: str) -> str:
+    for alias in MODEL_ENV_ALIASES.get(provider_name, ()):
+        value = get(alias, "")
+        if value:
+            return value
+    return get(MODEL_ENV[provider_name], DEFAULT_MODELS[provider_name])
 
 
 def _custom_provider_names(raw: str) -> tuple[str, ...]:

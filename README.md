@@ -69,6 +69,63 @@ Use it when you want:
 | Product Features | Agents, skills, persistent preferences, feedback capture |
 | Contracts | `/openapi.json`, documented endpoints, `.env.example`, deployment descriptors |
 
+## Benchmark Snapshot
+
+Measured locally on September 26, 2026 with Python's in-process ASGI path. The added-latency benchmark isolates gateway overhead by using a deterministic in-process upstream provider, so the numbers below exclude OpenAI network time and model generation time.
+
+| Metric | Result |
+| --- | ---: |
+| Benchmark iterations | 10,000 |
+| Warmup requests | 500 |
+| Mean added latency | `0.0649 ms` |
+| Median added latency | `0.0623 ms` |
+| p95 added latency | `0.0786 ms` |
+| p99 added latency | `0.0891 ms` |
+| Max added latency | `0.2454 ms` |
+| Throughput | `15,354.17 req/s` |
+| Memory before app | `31.484 MB` |
+| Memory at rest | `31.828 MB` |
+| App memory delta | `0.344 MB` |
+| Provider SDKs in runtime path | `none` |
+
+The p99 added gateway latency in this run is `0.0891 ms`, which is below the `1 ms` overhead target.
+
+Command:
+
+```bash
+PYTHONPATH=src python3 benchmarks/benchmark_gateway.py \
+  --iterations 10000 \
+  --warmup 500 \
+  --json
+```
+
+Real OpenAI verification was also run through the gateway using `gpt-5-nano`.
+
+| Real Model Verification | Result |
+| --- | ---: |
+| Provider | `openai` |
+| Model | `gpt-5-nano` |
+| Calls requested | `50` |
+| Calls verified | `50` |
+| Failures | `0` |
+| Reasoning effort | `minimal` |
+| Max completion tokens | `128` |
+| Mean end-to-end latency | `758.472 ms` |
+| Median end-to-end latency | `664.447 ms` |
+| p95 end-to-end latency | `977.734 ms` |
+| p99 end-to-end latency | `2694.137 ms` |
+
+Command:
+
+```bash
+PYTHONPATH=src python3 benchmarks/benchmark_gateway.py \
+  --real-openai-calls 50 \
+  --model gpt-5-nano \
+  --json
+```
+
+The real model latency numbers are end-to-end gateway-to-OpenAI timings. They validate real provider execution; they are not used as the gateway-added-overhead measurement.
+
 ## Provider Coverage
 
 | Provider | Style | Notes |
@@ -146,7 +203,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "provider": "openai",
-    "model": "gpt-4.1-mini",
+    "model": "gpt-5-nano",
     "messages": [{"role": "user", "content": "Say hello in five words."}]
   }'
 ```
@@ -166,6 +223,7 @@ API keys belong in `.env`:
 
 ```bash
 OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5-nano
 ANTHROPIC_API_KEY=...
 DEEPSEEK_API_KEY=...
 XAI_API_KEY=...
@@ -175,6 +233,8 @@ KIMI_API_KEY=...
 # Ollama is local and keyless unless you put it behind auth.
 OLLAMA_API_KEY=
 ```
+
+`OPENAI_MODEL` is supported as a convenience alias for the OpenAI default model used by the gateway. `OPENAI_DEFAULT_MODEL` is also supported for explicit provider naming.
 
 Redis powers shared cache and user memory:
 
@@ -197,7 +257,7 @@ Add any OpenAI-compatible provider without writing code:
 JUSTFASTLLM_OPENAI_COMPATIBLE_PROVIDERS=openrouter
 OPENROUTER_API_KEY=...
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_DEFAULT_MODEL=openai/gpt-4.1-mini
+OPENROUTER_DEFAULT_MODEL=openai/gpt-5-nano
 ```
 
 ## Gateway Endpoints
@@ -232,6 +292,24 @@ Compile-check the source, tests, and benchmark script:
 
 ```bash
 PYTHONPATH=src python3 -m compileall -q src tests benchmarks
+```
+
+Run the local gateway-overhead benchmark:
+
+```bash
+PYTHONPATH=src python3 benchmarks/benchmark_gateway.py \
+  --iterations 10000 \
+  --warmup 500 \
+  --json
+```
+
+Run 50 real OpenAI gateway calls with `gpt-5-nano`:
+
+```bash
+PYTHONPATH=src python3 benchmarks/benchmark_gateway.py \
+  --real-openai-calls 50 \
+  --model gpt-5-nano \
+  --json
 ```
 
 For major gateway changes, run the real Ollama integration test when Ollama is available:
