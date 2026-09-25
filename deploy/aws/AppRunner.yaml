@@ -1,0 +1,42 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AWS App Runner service for justfastllm. Build and push the Docker image to ECR, then set ImageIdentifier."
+
+Parameters:
+  ImageIdentifier:
+    Type: String
+    Description: "ECR image URI, for example 123456789012.dkr.ecr.us-east-1.amazonaws.com/justfastllm:latest"
+  RedisUrl:
+    Type: String
+    NoEcho: true
+    Description: "Redis URL for cache and user memory."
+
+Resources:
+  JustFastLLMService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: justfastllm
+      SourceConfiguration:
+        AutoDeploymentsEnabled: true
+        ImageRepository:
+          ImageIdentifier: !Ref ImageIdentifier
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: "8000"
+            RuntimeEnvironmentVariables:
+              JUSTFASTLLM_HOST: "0.0.0.0"
+              JUSTFASTLLM_PORT: "8000"
+              JUSTFASTLLM_CACHE_BACKEND: "redis"
+              JUSTFASTLLM_USER_MEMORY_BACKEND: "redis"
+              REDIS_URL: !Ref RedisUrl
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /health
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 3
+
+Outputs:
+  ServiceUrl:
+    Value: !GetAtt JustFastLLMService.ServiceUrl
+

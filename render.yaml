@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: justfastllm
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: JUSTFASTLLM_HOST
+        value: 0.0.0.0
+      - key: JUSTFASTLLM_PORT
+        value: 8000
+      - key: JUSTFASTLLM_CACHE_BACKEND
+        value: redis
+      - key: JUSTFASTLLM_USER_MEMORY_BACKEND
+        value: redis
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: justfastllm-redis
+          property: connectionString
+
+  - type: redis
+    name: justfastllm-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+

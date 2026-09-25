@@ -1,0 +1,41 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: justfastllm
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+    spec:
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPOSITORY/justfastllm:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: JUSTFASTLLM_HOST
+              value: 0.0.0.0
+            - name: JUSTFASTLLM_PORT
+              value: "8000"
+            - name: JUSTFASTLLM_CACHE_BACKEND
+              value: redis
+            - name: JUSTFASTLLM_USER_MEMORY_BACKEND
+              value: redis
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justfastllm-redis-url
+                  key: latest
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30
+
