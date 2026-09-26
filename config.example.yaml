@@ -15,6 +15,9 @@ gateway:
     backend: redis
     ttl_seconds: 60
     max_items: 1024
+    personal_data_allowed: false
+    database_url: ""
+    database_table: justfastllm_response_cache
     redis_key_prefix: justfastllm:cache:
   guardrails:
     enabled: true
@@ -30,12 +33,28 @@ gateway:
     enabled: true
     backend: redis
     key_prefix: justfastllm:memory:
+    database_url: ""
+    database_table: justfastllm_user_memory
   control_plane:
     master_key: ""
     key_header_name: authorization
-    storage_path: .justfastllm/proxy-control.json
+    storage_backend: redis
+    storage_path: ""
+    redis_url: redis://localhost:6379/0
+    redis_key: justfastllm:control-plane:state
+    database_url: ""
+    database_table: justfastllm_control_plane_state
     fallback_providers: []
     mirror_provider: ""
+  compliance:
+    enabled: true
+    usage_retention_days: 90
+    audit_retention_days: 365
+    privacy_contact: ""
+    security_contact: ""
+    subprocessors_url: ""
+    dpa_url: ""
+    require_ready: false
 
 providers:
   openai:

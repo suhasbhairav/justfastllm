@@ -65,14 +65,16 @@ Use it when you want:
 | Extensibility | Factory Pattern via `ProviderFactory`, plus env-driven OpenAI-compatible providers |
 | Operations | Health checks, structured request logging, request IDs, Docker health checks |
 | Performance | Raw ASGI app, pooled stdlib HTTP, dataclasses, minimal dependency footprint |
-| Scale | Redis cache and Redis-backed user memory for multi-instance deployments |
+| Scale | Database or Redis-backed cache, memory, and control-plane state for multi-instance deployments |
 | Safety | Request validation, configurable guardrails, runtime guardrail enable/disable endpoint |
 | Product Features | Agents, skills, persistent preferences, feedback capture |
 | Control Plane | Master key, virtual keys, service-account keys, model access, budgets, RPM/TPM limits |
+| Databases | Control-plane persistence for Postgres, MySQL, MongoDB, MSSQL, Redis, and file snapshots |
 | Analytics | Token, pricing, spend, cache, latency, user, team, model, and provider rollups |
 | Dashboard | Next.js App Router dashboard for operations, pricing, speed, guardrails, usage, and keys |
 | Configuration | `.env` plus optional structured YAML/JSON config file |
-| Enterprise Controls | Secret references, policies, plugin hooks, audit log, and runtime config reload |
+| Enterprise Controls | Secret references, policies, plugin hooks, audit log, retention, privacy export/erasure, and runtime config reload |
+| Compliance Readiness | GDPR, SOC 2, DPA, and India DPDP technical-control guide with operator checklist |
 | Contracts | `/openapi.json`, documented endpoints, `.env.example`, deployment descriptors |
 
 ## Gateway Control Plane
@@ -90,6 +92,8 @@ Use it when you want:
 | Teams and spend buckets | `/v1/proxy/teams`, `/team/new`, `/team/info`, `/team/list` |
 | Service-account keys | `/v1/service-accounts/keys`, `/service_account/key/generate` |
 | Metrics and usage | `/v1/metrics`, `/v1/usage`, `/v1/pricing`, `/v1/proxy/features` |
+| Compliance status, report, and integrity | `/v1/compliance/status`, `/v1/compliance/evidence`, `/v1/compliance/integrity`, `/v1/compliance/report` |
+| Privacy export and erasure | `/v1/privacy/users/{user_id}/export`, `/v1/privacy/users/{user_id}/erase` |
 | Fallback routing | `JUSTFASTLLM_FALLBACK_PROVIDERS` or `fallback_providers` in request JSON |
 | Traffic mirroring | `JUSTFASTLLM_MIRROR_PROVIDER` or `mirror_provider` in request JSON |
 
@@ -98,7 +102,9 @@ Set a master key to protect administrative routes and require virtual-key authen
 ```bash
 JUSTFASTLLM_MASTER_KEY=change-me
 JUSTFASTLLM_KEY_HEADER_NAME=authorization
-JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH=.justfastllm/proxy-control.json
+JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND=database
+JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/justfastllm?sslmode=require
+JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE=justfastllm_control_plane_state
 ```
 
 Create a key:
@@ -136,6 +142,8 @@ OPENAI_API_KEY=env:OPENAI_SECRET_NAME
 JUSTFASTLLM_MASTER_KEY=file:/run/secrets/gateway_master_key
 ```
 
+Compliance-readiness controls are documented in [Compliance Readiness](docs/COMPLIANCE.md), with a counsel-review starting point in [Data Processing Addendum Template](docs/DPA_TEMPLATE.md). The gateway automates technical controls such as retention, export, erasure, audit, auth, redaction, policies, guardrails, and evidence mapping; the deploying organization still owns legal notices, contracts, subprocessors, incident process, and any independent SOC 2 examination.
+
 ## Dashboard
 
 The repository includes a Next.js + JavaScript + App Router dashboard in [`dashboard`](dashboard). It connects to the gateway APIs and visualizes requests, tokens, estimated spend, latency percentiles, provider/model distribution, virtual keys, guardrails, pricing, users, and teams.
@@ -147,10 +155,6 @@ npm run dev
 ```
 
 By default the dashboard connects to `http://localhost:8000`. Set `NEXT_PUBLIC_GATEWAY_URL` for another gateway URL.
-
-### Dashboard Screenshots
-
-![justfastllm dashboard desktop](docs/assets/dashboard-overview.png)
 
 ## Benchmark Snapshot
 
@@ -230,7 +234,7 @@ The real model latency numbers are end-to-end gateway-to-OpenAI timings. They va
 | --- | --- |
 | Centralized access | Route app traffic through one gateway instead of scattering provider integrations |
 | Provider independence | Swap providers or models with config and routing conventions |
-| Cost discipline | Cache repeatable responses with Redis and keep runtime dependencies small |
+| Cost discipline | Cache repeatable responses with database or Redis storage and keep runtime dependencies small |
 | Operational visibility | Request logs, request IDs, `/health`, and provider error normalization |
 | Deployment ownership | Run it yourself on Docker, Render, Railway, AWS, or GCP |
 | Memory across sessions | Store preferences and feedback by user ID |
@@ -242,11 +246,11 @@ The real model latency numbers are end-to-end gateway-to-OpenAI timings. They va
 | Platform | Included Artifact | Best For |
 | --- | --- | --- |
 | Docker | `Dockerfile` | Portable production image |
-| Docker Compose | `docker-compose.yml` | Local production-like gateway plus Redis |
-| Render | `render.yaml` | Managed Docker web service with Redis |
+| Docker Compose | `docker-compose.yml` | Local production-like gateway plus Postgres |
+| Render | `render.yaml` | Managed Docker web service with database-backed persistence |
 | Railway | `railway.toml` | Fast Dockerfile-based deployment |
 | AWS | `deploy/aws/AppRunner.yaml` | App Runner service backed by an ECR image |
-| GCP | `deploy/gcp/cloudrun-service.yaml` | Cloud Run service with Secret Manager Redis URL |
+| GCP | `deploy/gcp/cloudrun-service.yaml` | Cloud Run service with Secret Manager database URL |
 
 See [Enterprise](docs/ENTERPRISE.md), [Deployment](docs/DEPLOYMENT.md), [Docker](docs/DOCKER.md), and [Operations](docs/OPERATIONS.md) for complete platform guidance.
 
@@ -319,13 +323,18 @@ OLLAMA_API_KEY=
 
 `OPENAI_MODEL` is supported as a convenience alias for the OpenAI default model used by the gateway. `OPENAI_DEFAULT_MODEL` is also supported for explicit provider naming.
 
-Redis powers shared cache and user memory:
+Redis powers the default shared cache for simple deployments. Compliance-sensitive deployments can use SQLAlchemy or MongoDB database URLs for response cache, user memory, and the control plane across Postgres, MySQL, MSSQL, and MongoDB:
 
 ```bash
-REDIS_URL=redis://localhost:6379/0
-JUSTFASTLLM_CACHE_BACKEND=redis
-JUSTFASTLLM_USER_MEMORY_BACKEND=redis
+JUSTFASTLLM_CACHE_BACKEND=database
+JUSTFASTLLM_CACHE_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/justfastllm?sslmode=require
+JUSTFASTLLM_CACHE_DATABASE_TABLE=justfastllm_response_cache
+JUSTFASTLLM_USER_MEMORY_BACKEND=database
+JUSTFASTLLM_USER_MEMORY_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/justfastllm?sslmode=require
+JUSTFASTLLM_USER_MEMORY_DATABASE_TABLE=justfastllm_user_memory
 ```
+
+In compliance mode, response-cache storage remains disabled unless `JUSTFASTLLM_CACHE_PERSONAL_DATA_ALLOWED=true` is set by policy.
 
 For local tests or single-process development:
 
@@ -355,14 +364,14 @@ OPENROUTER_DEFAULT_MODEL=openai/gpt-5-nano
 | --- | --- |
 | `GET /health` | Runtime health check |
 | `GET /openapi.json` | OpenAPI contract |
-| `GET /v1/models` | List known gateway models |
-| `GET /v1/providers/{provider}/models` | List models for a provider |
+| `GET /v1/models` | List known gateway models; requires gateway auth when configured |
+| `GET /v1/providers/{provider}/models` | List models for a provider; requires gateway auth when configured |
 | `POST /v1/chat/completions` | OpenAI-style chat completion |
 | `POST /v1/messages` | Anthropic-style messages entry point |
-| `GET /v1/skills` | List gateway skills |
-| `POST /v1/skills/{skill_name}/run` | Run a skill |
-| `GET /v1/guardrails` | Inspect guardrail settings |
-| `PATCH /v1/guardrails` | Enable or disable guardrails |
+| `GET /v1/skills` | List gateway skills; requires the master key when configured |
+| `POST /v1/skills/{skill_name}/run` | Run a skill; requires the master key when configured |
+| `GET /v1/guardrails` | Inspect guardrail settings; requires the master key when configured |
+| `PATCH /v1/guardrails` | Enable or disable guardrails; requires the master key when configured |
 | `POST /v1/agents/runs` | Run an agent workflow |
 | `GET /v1/users/{user_id}/preferences` | Read user preferences |
 | `PUT /v1/users/{user_id}/preferences` | Update user preferences |

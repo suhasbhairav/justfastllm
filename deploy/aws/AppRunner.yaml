@@ -5,16 +5,41 @@ Parameters:
   ImageIdentifier:
     Type: String
     Description: "ECR image URI, for example 123456789012.dkr.ecr.us-east-1.amazonaws.com/justfastllm:latest"
-  RedisUrl:
+  DatabaseUrl:
     Type: String
     NoEcho: true
-    Description: "Redis URL for cache and user memory."
+    Description: "SQLAlchemy or MongoDB URL for control-plane state, user memory, and optional response cache."
+  MasterKey:
+    Type: String
+    NoEcho: true
+    Description: "Gateway master key. Use a strong secret."
+  PrivacyContact:
+    Type: String
+    Description: "Privacy contact email or URL."
+  SecurityContact:
+    Type: String
+    Description: "Security contact email or URL."
+  SubprocessorsUrl:
+    Type: String
+    Description: "Public or customer-facing subprocessor list URL."
+  DpaUrl:
+    Type: String
+    Description: "Public or customer-facing data-processing terms URL."
 
 Resources:
+  JustFastLLMAutoScaling:
+    Type: AWS::AppRunner::AutoScalingConfiguration
+    Properties:
+      AutoScalingConfigurationName: justfastllm-single-writer
+      MinSize: 1
+      MaxSize: 1
+      MaxConcurrency: 100
+
   JustFastLLMService:
     Type: AWS::AppRunner::Service
     Properties:
       ServiceName: justfastllm
+      AutoScalingConfigurationArn: !GetAtt JustFastLLMAutoScaling.AutoScalingConfigurationArn
       SourceConfiguration:
         AutoDeploymentsEnabled: true
         ImageRepository:
@@ -25,9 +50,25 @@ Resources:
             RuntimeEnvironmentVariables:
               JUSTFASTLLM_HOST: "0.0.0.0"
               JUSTFASTLLM_PORT: "8000"
-              JUSTFASTLLM_CACHE_BACKEND: "redis"
-              JUSTFASTLLM_USER_MEMORY_BACKEND: "redis"
-              REDIS_URL: !Ref RedisUrl
+              JUSTFASTLLM_MASTER_KEY: !Ref MasterKey
+              JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND: "database"
+              JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL: !Ref DatabaseUrl
+              JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE: "justfastllm_control_plane_state"
+              JUSTFASTLLM_COMPLIANCE_MODE: "true"
+              JUSTFASTLLM_REQUIRE_COMPLIANCE_READY: "true"
+              JUSTFASTLLM_CACHE_PERSONAL_DATA_ALLOWED: "false"
+              JUSTFASTLLM_USAGE_RETENTION_DAYS: "90"
+              JUSTFASTLLM_AUDIT_RETENTION_DAYS: "365"
+              JUSTFASTLLM_PRIVACY_CONTACT: !Ref PrivacyContact
+              JUSTFASTLLM_SECURITY_CONTACT: !Ref SecurityContact
+              JUSTFASTLLM_SUBPROCESSORS_URL: !Ref SubprocessorsUrl
+              JUSTFASTLLM_DPA_URL: !Ref DpaUrl
+              JUSTFASTLLM_CACHE_BACKEND: "database"
+              JUSTFASTLLM_CACHE_DATABASE_URL: !Ref DatabaseUrl
+              JUSTFASTLLM_CACHE_DATABASE_TABLE: "justfastllm_response_cache"
+              JUSTFASTLLM_USER_MEMORY_BACKEND: "database"
+              JUSTFASTLLM_USER_MEMORY_DATABASE_URL: !Ref DatabaseUrl
+              JUSTFASTLLM_USER_MEMORY_DATABASE_TABLE: "justfastllm_user_memory"
       HealthCheckConfiguration:
         Protocol: HTTP
         Path: /health
@@ -39,4 +80,3 @@ Resources:
 Outputs:
   ServiceUrl:
     Value: !GetAtt JustFastLLMService.ServiceUrl
-

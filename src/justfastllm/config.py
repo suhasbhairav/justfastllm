@@ -77,6 +77,9 @@ class Settings:
     cache_backend: str
     cache_ttl_seconds: float
     cache_max_items: int
+    cache_personal_data_allowed: bool
+    cache_database_url: str
+    cache_database_table: str
     redis_url: str
     redis_key_prefix: str
     request_timeout_seconds: float
@@ -88,6 +91,8 @@ class Settings:
     user_memory_enabled: bool = True
     user_memory_backend: str = "redis"
     user_memory_key_prefix: str = "justfastllm:memory:"
+    user_memory_database_url: str = ""
+    user_memory_database_table: str = "justfastllm_user_memory"
     block_patterns: tuple[str, ...] = ()
     policy_denied_models: tuple[str, ...] = ()
     policy_allowed_providers: tuple[str, ...] = ()
@@ -97,9 +102,22 @@ class Settings:
     plugin_modules: tuple[str, ...] = ()
     master_key: str = ""
     key_header_name: str = "authorization"
+    control_plane_storage_backend: str = "memory"
     control_plane_storage_path: str = ""
+    control_plane_redis_url: str = ""
+    control_plane_redis_key: str = "justfastllm:control-plane:state"
+    control_plane_database_url: str = ""
+    control_plane_database_table: str = "justfastllm_control_plane_state"
     fallback_providers: tuple[str, ...] = ()
     mirror_provider: str = ""
+    compliance_mode: bool = True
+    usage_retention_days: int = 90
+    audit_retention_days: int = 365
+    privacy_contact: str = ""
+    security_contact: str = ""
+    subprocessors_url: str = ""
+    dpa_url: str = ""
+    require_compliance_ready: bool = False
     providers: Mapping[str, ProviderConfig] = field(default_factory=dict)
 
 
@@ -147,6 +165,9 @@ def load_settings(env_file: str | Path = ".env", environ: Mapping[str, str] | No
         cache_backend=get("JUSTFASTLLM_CACHE_BACKEND", "redis").lower(),
         cache_ttl_seconds=float(get("JUSTFASTLLM_CACHE_TTL_SECONDS", "60")),
         cache_max_items=int(get("JUSTFASTLLM_CACHE_MAX_ITEMS", "1024")),
+        cache_personal_data_allowed=_as_bool(get("JUSTFASTLLM_CACHE_PERSONAL_DATA_ALLOWED", "false")),
+        cache_database_url=_resolve_secret(get("JUSTFASTLLM_CACHE_DATABASE_URL", ""), get),
+        cache_database_table=get("JUSTFASTLLM_CACHE_DATABASE_TABLE", "justfastllm_response_cache"),
         redis_url=get("REDIS_URL", "redis://localhost:6379/0"),
         redis_key_prefix=get("JUSTFASTLLM_REDIS_KEY_PREFIX", "justfastllm:cache:"),
         request_timeout_seconds=timeout,
@@ -158,6 +179,8 @@ def load_settings(env_file: str | Path = ".env", environ: Mapping[str, str] | No
         user_memory_enabled=_as_bool(get("JUSTFASTLLM_USER_MEMORY_ENABLED", "true")),
         user_memory_backend=get("JUSTFASTLLM_USER_MEMORY_BACKEND", "redis").lower(),
         user_memory_key_prefix=get("JUSTFASTLLM_USER_MEMORY_KEY_PREFIX", "justfastllm:memory:"),
+        user_memory_database_url=_resolve_secret(get("JUSTFASTLLM_USER_MEMORY_DATABASE_URL", ""), get),
+        user_memory_database_table=get("JUSTFASTLLM_USER_MEMORY_DATABASE_TABLE", "justfastllm_user_memory"),
         block_patterns=block_patterns,
         policy_denied_models=_csv_tuple(get("JUSTFASTLLM_POLICY_DENIED_MODELS", "")),
         policy_allowed_providers=_csv_tuple(get("JUSTFASTLLM_POLICY_ALLOWED_PROVIDERS", "")),
@@ -171,9 +194,23 @@ def load_settings(env_file: str | Path = ".env", environ: Mapping[str, str] | No
         plugin_modules=tuple(item.strip() for item in get("JUSTFASTLLM_PLUGIN_MODULES", "").split(",") if item.strip()),
         master_key=_resolve_secret(get("JUSTFASTLLM_MASTER_KEY", ""), get),
         key_header_name=get("JUSTFASTLLM_KEY_HEADER_NAME", "authorization").lower(),
+        control_plane_storage_backend=get("JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND", "").lower()
+        or ("file" if get("JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH", "") else "memory"),
         control_plane_storage_path=get("JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH", ""),
+        control_plane_redis_url=get("JUSTFASTLLM_CONTROL_PLANE_REDIS_URL", "") or get("REDIS_URL", "redis://localhost:6379/0"),
+        control_plane_redis_key=get("JUSTFASTLLM_CONTROL_PLANE_REDIS_KEY", "justfastllm:control-plane:state"),
+        control_plane_database_url=_resolve_secret(get("JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL", ""), get),
+        control_plane_database_table=get("JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE", "justfastllm_control_plane_state"),
         fallback_providers=_csv_tuple(get("JUSTFASTLLM_FALLBACK_PROVIDERS", "")),
         mirror_provider=get("JUSTFASTLLM_MIRROR_PROVIDER", "").lower(),
+        compliance_mode=_as_bool(get("JUSTFASTLLM_COMPLIANCE_MODE", "true")),
+        usage_retention_days=int(get("JUSTFASTLLM_USAGE_RETENTION_DAYS", "90")),
+        audit_retention_days=int(get("JUSTFASTLLM_AUDIT_RETENTION_DAYS", "365")),
+        privacy_contact=get("JUSTFASTLLM_PRIVACY_CONTACT", ""),
+        security_contact=get("JUSTFASTLLM_SECURITY_CONTACT", ""),
+        subprocessors_url=get("JUSTFASTLLM_SUBPROCESSORS_URL", ""),
+        dpa_url=get("JUSTFASTLLM_DPA_URL", ""),
+        require_compliance_ready=_as_bool(get("JUSTFASTLLM_REQUIRE_COMPLIANCE_READY", "false")),
         providers=providers,
     )
 
@@ -209,6 +246,7 @@ def _flatten_config(raw: Mapping[str, object]) -> dict[str, str]:
     guardrails = _dict(gateway.get("guardrails"))
     memory = _dict(gateway.get("memory"))
     control = _dict(gateway.get("control_plane"))
+    compliance = _dict(gateway.get("compliance"))
     policies = _dict(gateway.get("policies"))
     plugins = raw.get("plugins")
     providers = _dict(raw.get("providers"))
@@ -227,6 +265,9 @@ def _flatten_config(raw: Mapping[str, object]) -> dict[str, str]:
     _put(values, "JUSTFASTLLM_CACHE_BACKEND", cache.get("backend"))
     _put(values, "JUSTFASTLLM_CACHE_TTL_SECONDS", cache.get("ttl_seconds"))
     _put(values, "JUSTFASTLLM_CACHE_MAX_ITEMS", cache.get("max_items"))
+    _put(values, "JUSTFASTLLM_CACHE_PERSONAL_DATA_ALLOWED", cache.get("personal_data_allowed"))
+    _put(values, "JUSTFASTLLM_CACHE_DATABASE_URL", cache.get("database_url"))
+    _put(values, "JUSTFASTLLM_CACHE_DATABASE_TABLE", cache.get("database_table"))
     _put(values, "JUSTFASTLLM_REDIS_KEY_PREFIX", cache.get("redis_key_prefix"))
 
     _put(values, "JUSTFASTLLM_GUARDRAILS_ENABLED", guardrails.get("enabled"))
@@ -243,12 +284,28 @@ def _flatten_config(raw: Mapping[str, object]) -> dict[str, str]:
     _put(values, "JUSTFASTLLM_USER_MEMORY_ENABLED", memory.get("enabled"))
     _put(values, "JUSTFASTLLM_USER_MEMORY_BACKEND", memory.get("backend"))
     _put(values, "JUSTFASTLLM_USER_MEMORY_KEY_PREFIX", memory.get("key_prefix"))
+    _put(values, "JUSTFASTLLM_USER_MEMORY_DATABASE_URL", memory.get("database_url"))
+    _put(values, "JUSTFASTLLM_USER_MEMORY_DATABASE_TABLE", memory.get("database_table"))
 
     _put(values, "JUSTFASTLLM_MASTER_KEY", control.get("master_key"))
     _put(values, "JUSTFASTLLM_KEY_HEADER_NAME", control.get("key_header_name"))
+    _put(values, "JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND", control.get("storage_backend"))
     _put(values, "JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH", control.get("storage_path"))
+    _put(values, "JUSTFASTLLM_CONTROL_PLANE_REDIS_URL", control.get("redis_url"))
+    _put(values, "JUSTFASTLLM_CONTROL_PLANE_REDIS_KEY", control.get("redis_key"))
+    _put(values, "JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL", control.get("database_url"))
+    _put(values, "JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE", control.get("database_table"))
     _put_csv(values, "JUSTFASTLLM_FALLBACK_PROVIDERS", control.get("fallback_providers"))
     _put(values, "JUSTFASTLLM_MIRROR_PROVIDER", control.get("mirror_provider"))
+
+    _put(values, "JUSTFASTLLM_COMPLIANCE_MODE", compliance.get("enabled"))
+    _put(values, "JUSTFASTLLM_USAGE_RETENTION_DAYS", compliance.get("usage_retention_days"))
+    _put(values, "JUSTFASTLLM_AUDIT_RETENTION_DAYS", compliance.get("audit_retention_days"))
+    _put(values, "JUSTFASTLLM_PRIVACY_CONTACT", compliance.get("privacy_contact"))
+    _put(values, "JUSTFASTLLM_SECURITY_CONTACT", compliance.get("security_contact"))
+    _put(values, "JUSTFASTLLM_SUBPROCESSORS_URL", compliance.get("subprocessors_url"))
+    _put(values, "JUSTFASTLLM_DPA_URL", compliance.get("dpa_url"))
+    _put(values, "JUSTFASTLLM_REQUIRE_COMPLIANCE_READY", compliance.get("require_ready"))
 
     custom_names = []
     custom = raw.get("custom_openai_compatible_providers", [])

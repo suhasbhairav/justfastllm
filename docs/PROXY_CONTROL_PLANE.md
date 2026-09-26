@@ -9,7 +9,9 @@ Set `JUSTFASTLLM_MASTER_KEY` to require authenticated administrative access and 
 ```bash
 JUSTFASTLLM_MASTER_KEY=change-me
 JUSTFASTLLM_KEY_HEADER_NAME=authorization
-JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH=.justfastllm/proxy-control.json
+JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND=database
+JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL=env:JUSTFASTLLM_DATABASE_URL
+JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE=justfastllm_control_plane_state
 ```
 
 By default, clients authenticate with:
@@ -23,6 +25,12 @@ If `JUSTFASTLLM_KEY_HEADER_NAME=x-justfastllm-key` is set, clients can instead s
 ```http
 x-justfastllm-key: <key>
 ```
+
+Every HTTP request records a sanitized access event with request ID, method, path, status, latency, auth context, key preview, user ID, and team ID. Access events are saved immediately to the configured durable control-plane backend and can be inspected through `/v1/access` without storing raw headers, prompts, completions, or request bodies.
+
+Authentication decisions are recorded as sanitized auth events. Operators can inspect `/v1/auth/events` to review admin and virtual-key successes, failures, bypasses, reasons, routes, models, key previews, user IDs, and team IDs without storing raw tokens or headers.
+
+Audit, endpoint access, and authentication events include tamper-evident hash-chain fields. `/v1/compliance/integrity` reports `hash_chain.valid`, `latest_hash`, and `broken_index` for each category so deployment and audit evidence can detect modified or reordered records.
 
 ## Virtual Keys
 
@@ -94,9 +102,27 @@ curl 'http://localhost:8000/v1/proxy/users/info?user_id=user-1' \
   -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY"
 ```
 
+Correct a user record:
+
+```bash
+curl -X PATCH http://localhost:8000/v1/proxy/users/update \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"user-1","user_email":"corrected@example.com","metadata":{"name":"Corrected"}}'
+```
+
 ## Teams
 
 Teams group keys and usage by business unit, customer, workspace, or environment.
+
+Correct a team record:
+
+```bash
+curl -X PATCH http://localhost:8000/v1/proxy/teams/update \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id":"platform","team_alias":"Platform","metadata":{"owner":"ops"}}'
+```
 
 ```bash
 curl -X POST http://localhost:8000/v1/proxy/teams \
@@ -180,8 +206,35 @@ Mirrored calls are fire-and-forget and do not alter the client response.
 
 ## Current Persistence Model
 
-The control plane runs in memory by default. Set `JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH` to persist keys, users, teams, spend, and recent request events to an atomic JSON snapshot.
+The control plane runs in memory by default. Use database-backed storage when you need durable control-plane records outside the gateway process:
 
-The JSON snapshot is suitable for local development and single-node deployments. For horizontally scaled production deployments, keep one writer process for this file-backed mode or add a shared database backend before running multiple gateway replicas.
+```bash
+JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND=database
+JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL=postgresql+psycopg://user:pass@host:5432/justfastllm
+JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE=justfastllm_control_plane_state
+```
 
-Response cache and user memory already support Redis.
+Supported database URL families:
+
+| Database | Driver package | URL example |
+| --- | --- | --- |
+| Postgres | `psycopg[binary]` | `postgresql+psycopg://user:pass@host:5432/justfastllm` |
+| MySQL | `PyMySQL` | `mysql+pymysql://user:pass@host:3306/justfastllm` |
+| MSSQL | `pymssql` | `mssql+pymssql://user:pass@host:1433/justfastllm` |
+| MongoDB | `pymongo` | `mongodb://host:27017/justfastllm` |
+
+`/health` and `/v1/compliance/status` include the detected database family and driver dependency for database-backed control-plane, cache, and user-memory stores.
+
+Redis-backed storage is also available for single-writer managed deployments:
+
+```bash
+JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND=redis
+JUSTFASTLLM_CONTROL_PLANE_REDIS_URL=$REDIS_URL
+JUSTFASTLLM_CONTROL_PLANE_REDIS_KEY=justfastllm:control-plane:state
+```
+
+Database and Redis storage persist keys, users, teams, spend, usage, endpoint access, authentication, audit, privacy requests, and erasure evidence in a shared state snapshot. For local development and single-node deployments, set `JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND=file` plus `JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH` to persist an atomic JSON snapshot.
+
+SQL state snapshots use an unbounded text-style column where the database supports it; MySQL uses `LONGTEXT` for the JSON state payload so audit-heavy deployments are not constrained by the smaller default `TEXT` size.
+
+Built-in control-plane persistence is single-writer. Use one active gateway replica for compliance-sensitive deployments, or add an external database-backed control plane before running multiple active writer replicas.

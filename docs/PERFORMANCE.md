@@ -6,7 +6,7 @@
 - Dataclasses and plain dictionaries instead of runtime model validation frameworks.
 - Provider APIs are called directly over HTTP; provider SDKs are not used.
 - Pooled stdlib HTTP transport reuses upstream connections.
-- Redis cache and user memory use a small RESP client instead of a Redis SDK.
+- Redis cache and user memory use a small RESP client instead of a Redis SDK; database-backed cache and memory are optional for durable deployments.
 - Optional `orjson` speedup is isolated behind `.[speedups]`.
 
 ## Gateway Overhead Benchmark
@@ -32,4 +32,3 @@ upstream_calls: 1050
 ```
 
 Use the benchmark for relative comparisons between commits and configuration choices.
-

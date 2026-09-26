@@ -10,18 +10,43 @@ services:
         value: 0.0.0.0
       - key: JUSTFASTLLM_PORT
         value: 8000
+      - key: JUSTFASTLLM_MASTER_KEY
+        generateValue: true
+      - key: JUSTFASTLLM_DATABASE_URL
+        sync: false
+      - key: JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND
+        value: database
+      - key: JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL
+        value: env:JUSTFASTLLM_DATABASE_URL
+      - key: JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE
+        value: justfastllm_control_plane_state
+      - key: JUSTFASTLLM_COMPLIANCE_MODE
+        value: true
+      - key: JUSTFASTLLM_REQUIRE_COMPLIANCE_READY
+        value: true
+      - key: JUSTFASTLLM_CACHE_PERSONAL_DATA_ALLOWED
+        value: false
+      - key: JUSTFASTLLM_USAGE_RETENTION_DAYS
+        value: 90
+      - key: JUSTFASTLLM_AUDIT_RETENTION_DAYS
+        value: 365
+      - key: JUSTFASTLLM_PRIVACY_CONTACT
+        sync: false
+      - key: JUSTFASTLLM_SECURITY_CONTACT
+        sync: false
+      - key: JUSTFASTLLM_SUBPROCESSORS_URL
+        sync: false
+      - key: JUSTFASTLLM_DPA_URL
+        sync: false
       - key: JUSTFASTLLM_CACHE_BACKEND
-        value: redis
+        value: database
+      - key: JUSTFASTLLM_CACHE_DATABASE_URL
+        value: env:JUSTFASTLLM_DATABASE_URL
+      - key: JUSTFASTLLM_CACHE_DATABASE_TABLE
+        value: justfastllm_response_cache
       - key: JUSTFASTLLM_USER_MEMORY_BACKEND
-        value: redis
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: justfastllm-redis
-          property: connectionString
-
-  - type: redis
-    name: justfastllm-redis
-    plan: starter
-    maxmemoryPolicy: allkeys-lru
-
+        value: database
+      - key: JUSTFASTLLM_USER_MEMORY_DATABASE_URL
+        value: env:JUSTFASTLLM_DATABASE_URL
+      - key: JUSTFASTLLM_USER_MEMORY_DATABASE_TABLE
+        value: justfastllm_user_memory

@@ -10,12 +10,17 @@ docker run --rm --env-file .env -p 8000:8000 justfastllm:local
 
 The image runs as the non-root `justfastllm` user and includes a `/health` healthcheck.
 
-Run with Redis using Docker Compose:
+Run with Postgres using Docker Compose:
 
 ```bash
 cp .env.example .env
+# Set POSTGRES_PASSWORD, JUSTFASTLLM_MASTER_KEY, JUSTFASTLLM_PRIVACY_CONTACT,
+# JUSTFASTLLM_SECURITY_CONTACT, JUSTFASTLLM_SUBPROCESSORS_URL,
+# and JUSTFASTLLM_DPA_URL before production compose deployment.
 docker compose --env-file .env up --build
 ```
+
+The Compose file enables the compliance readiness health gate and uses Postgres for control-plane state, user memory, and response-cache settings.
 
 The gateway will be available at:
 

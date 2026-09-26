@@ -33,5 +33,6 @@ The dashboard can also change the gateway URL from the top bar at runtime.
 - Usage events
 - Audit history
 - Provider health and alerts
+- Compliance controls, retention windows, and operator tasks
 - Pricing table
 - Gateway feature inventory

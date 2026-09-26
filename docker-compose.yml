@@ -5,11 +5,30 @@ services:
     ports:
       - "8000:8000"
     environment:
-      REDIS_URL: redis://redis:6379/0
       JUSTFASTLLM_HOST: 0.0.0.0
       JUSTFASTLLM_PORT: 8000
+      JUSTFASTLLM_MASTER_KEY: ${JUSTFASTLLM_MASTER_KEY:?set JUSTFASTLLM_MASTER_KEY before deployment}
+      JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND: database
+      JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL: "postgresql+psycopg://justfastllm:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD before deployment}@postgres:5432/justfastllm"
+      JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE: justfastllm_control_plane_state
+      JUSTFASTLLM_CACHE_BACKEND: database
+      JUSTFASTLLM_CACHE_DATABASE_URL: "postgresql+psycopg://justfastllm:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD before deployment}@postgres:5432/justfastllm"
+      JUSTFASTLLM_CACHE_DATABASE_TABLE: justfastllm_response_cache
+      JUSTFASTLLM_USER_MEMORY_BACKEND: database
+      JUSTFASTLLM_USER_MEMORY_DATABASE_URL: "postgresql+psycopg://justfastllm:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD before deployment}@postgres:5432/justfastllm"
+      JUSTFASTLLM_USER_MEMORY_DATABASE_TABLE: justfastllm_user_memory
+      JUSTFASTLLM_COMPLIANCE_MODE: "true"
+      JUSTFASTLLM_REQUIRE_COMPLIANCE_READY: "true"
+      JUSTFASTLLM_CACHE_PERSONAL_DATA_ALLOWED: "false"
+      JUSTFASTLLM_USAGE_RETENTION_DAYS: ${JUSTFASTLLM_USAGE_RETENTION_DAYS:-90}
+      JUSTFASTLLM_AUDIT_RETENTION_DAYS: ${JUSTFASTLLM_AUDIT_RETENTION_DAYS:-365}
+      JUSTFASTLLM_PRIVACY_CONTACT: ${JUSTFASTLLM_PRIVACY_CONTACT:?set JUSTFASTLLM_PRIVACY_CONTACT before deployment}
+      JUSTFASTLLM_SECURITY_CONTACT: ${JUSTFASTLLM_SECURITY_CONTACT:?set JUSTFASTLLM_SECURITY_CONTACT before deployment}
+      JUSTFASTLLM_SUBPROCESSORS_URL: ${JUSTFASTLLM_SUBPROCESSORS_URL:?set JUSTFASTLLM_SUBPROCESSORS_URL before deployment}
+      JUSTFASTLLM_DPA_URL: ${JUSTFASTLLM_DPA_URL:?set JUSTFASTLLM_DPA_URL before deployment}
     depends_on:
-      - redis
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import json, urllib.request; json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2))"]
       interval: 30s
@@ -17,12 +36,21 @@ services:
       retries: 3
       start_period: 10s
 
-  redis:
-    image: redis:7-alpine
+  postgres:
+    image: postgres:16-alpine
     ports:
-      - "6379:6379"
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: justfastllm
+      POSTGRES_USER: justfastllm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD before deployment}
+    volumes:
+      - justfastllm-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U justfastllm -d justfastllm"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  justfastllm-postgres:

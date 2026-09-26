@@ -7,7 +7,7 @@ spec:
     metadata:
       annotations:
         autoscaling.knative.dev/minScale: "0"
-        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/maxScale: "1"
     spec:
       containers:
         - image: REGION-docker.pkg.dev/PROJECT_ID/REPOSITORY/justfastllm:latest
@@ -18,15 +18,68 @@ spec:
               value: 0.0.0.0
             - name: JUSTFASTLLM_PORT
               value: "8000"
-            - name: JUSTFASTLLM_CACHE_BACKEND
-              value: redis
-            - name: JUSTFASTLLM_USER_MEMORY_BACKEND
-              value: redis
-            - name: REDIS_URL
+            - name: JUSTFASTLLM_MASTER_KEY
               valueFrom:
                 secretKeyRef:
-                  name: justfastllm-redis-url
+                  name: justfastllm-master-key
                   key: latest
+            - name: JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND
+              value: database
+            - name: JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justfastllm-database-url
+                  key: latest
+            - name: JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE
+              value: justfastllm_control_plane_state
+            - name: JUSTFASTLLM_COMPLIANCE_MODE
+              value: "true"
+            - name: JUSTFASTLLM_REQUIRE_COMPLIANCE_READY
+              value: "true"
+            - name: JUSTFASTLLM_CACHE_PERSONAL_DATA_ALLOWED
+              value: "false"
+            - name: JUSTFASTLLM_USAGE_RETENTION_DAYS
+              value: "90"
+            - name: JUSTFASTLLM_AUDIT_RETENTION_DAYS
+              value: "365"
+            - name: JUSTFASTLLM_PRIVACY_CONTACT
+              valueFrom:
+                secretKeyRef:
+                  name: justfastllm-privacy-contact
+                  key: latest
+            - name: JUSTFASTLLM_SECURITY_CONTACT
+              valueFrom:
+                secretKeyRef:
+                  name: justfastllm-security-contact
+                  key: latest
+            - name: JUSTFASTLLM_SUBPROCESSORS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justfastllm-subprocessors-url
+                  key: latest
+            - name: JUSTFASTLLM_DPA_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justfastllm-dpa-url
+                  key: latest
+            - name: JUSTFASTLLM_CACHE_BACKEND
+              value: database
+            - name: JUSTFASTLLM_CACHE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justfastllm-database-url
+                  key: latest
+            - name: JUSTFASTLLM_CACHE_DATABASE_TABLE
+              value: justfastllm_response_cache
+            - name: JUSTFASTLLM_USER_MEMORY_BACKEND
+              value: database
+            - name: JUSTFASTLLM_USER_MEMORY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: justfastllm-database-url
+                  key: latest
+            - name: JUSTFASTLLM_USER_MEMORY_DATABASE_TABLE
+              value: justfastllm_user_memory
           startupProbe:
             httpGet:
               path: /health
@@ -38,4 +91,3 @@ spec:
               path: /health
               port: 8000
             periodSeconds: 30
-

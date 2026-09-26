@@ -6,15 +6,17 @@ Returns gateway health and registered providers.
 
 ## `GET /openapi.json`
 
-Returns the gateway OpenAPI 3.1 contract.
+Returns the gateway OpenAPI 3.1 contract, including `MasterKeyAuth` and `GatewayAuth` security schemes for admin, gateway, and user-memory routes.
+
+The test suite compares the app route inventory to the OpenAPI path list so new HTTP routes must be documented before release.
 
 ## `GET /v1/models`
 
-Returns one default model entry per configured provider.
+Returns one default model entry per configured provider. Requires gateway authentication when configured.
 
 ## `GET /v1/providers/{provider}/models`
 
-Proxies live model discovery to a provider. OpenAI-compatible providers call `GET {BASE_URL}/models`; Anthropic calls `GET {ANTHROPIC_BASE_URL}/models` with Anthropic headers.
+Proxies live model discovery to a provider. OpenAI-compatible providers call `GET {BASE_URL}/models`; Anthropic calls `GET {ANTHROPIC_BASE_URL}/models` with Anthropic headers. Requires gateway authentication when configured.
 
 ## `POST /v1/chat/completions`
 
@@ -54,11 +56,11 @@ Messages-style proxy. Anthropic requests are sent to `/v1/messages`; OpenAI-comp
 
 ## `GET /v1/skills`
 
-Lists registered gateway skills.
+Lists registered gateway skills. Requires the master key when configured.
 
 ## `POST /v1/skills/{skill_name}/run`
 
-Runs a gateway skill.
+Runs a gateway skill. Requires the master key when configured.
 
 ```json
 {
@@ -78,11 +80,11 @@ Built-in skills:
 
 ### `GET /v1/guardrails`
 
-Returns the current guardrail state.
+Returns the current guardrail state. Requires the master key when configured.
 
 ### `PATCH /v1/guardrails`
 
-Enables or disables all guardrails or specific checks at runtime.
+Enables or disables all guardrails or specific checks at runtime. Requires the master key when configured.
 
 ```json
 {
@@ -159,9 +161,13 @@ Creates a virtual key with optional model access, budget, RPM, TPM, aliases, use
 }
 ```
 
-### `POST /v1/keys/info`
+### `GET /v1/keys/info`
 
-Returns public key metadata and spend. `GET /key/info?key=...` is also supported.
+Returns public key metadata and spend. `POST /v1/keys/info`, `GET /key/info?key=...`, and `POST /key/info` are also supported.
+
+### `PATCH /v1/keys/update`
+
+Updates key access, budgets, rate limits, aliases, route access, disabled state, or metadata. `POST /v1/keys/update`, `PATCH /key/update`, and `POST /key/update` are also supported.
 
 ### `DELETE /v1/keys`
 
@@ -179,6 +185,10 @@ Lists user spend buckets.
 
 Returns user spend and attached keys. Accepts `user_id` as a query parameter.
 
+### `PATCH /v1/proxy/users/update`
+
+Updates a user spend bucket for correction or rectification workflows. Accepts `user_id` plus fields such as `user_email`, `models`, `max_budget`, limits, and `metadata`. `POST /v1/proxy/users/update` and legacy `POST /user/update` are also supported. Requires the master key.
+
 ### `POST /v1/proxy/teams`
 
 Creates a team spend bucket.
@@ -191,9 +201,15 @@ Lists team spend buckets.
 
 Returns team spend and attached keys. Accepts `team_id` as a query parameter.
 
+### `PATCH /v1/proxy/teams/update`
+
+Updates a team spend bucket for correction or rectification workflows. Accepts `team_id` plus fields such as `team_alias`, `models`, `max_budget`, and `metadata`. `POST /v1/proxy/teams/update` and legacy `POST /team/update` are also supported. Requires the master key.
+
 ### `POST /v1/service-accounts/keys`
 
 Creates a service-account key for automation jobs.
+
+Canonical update/delete routes and compatibility aliases are included in `/openapi.json` and require the master key: `/user/new`, `/user/info`, `/user/update`, `/user/delete`, `/v1/proxy/users/delete`, `/v1/proxy/teams/update`, `/v1/proxy/teams/delete`, `/team/new`, `/team/info`, `/team/list`, `/team/update`, `/team/delete`, and `/service_account/key/generate`.
 
 ### `GET /v1/metrics`
 
@@ -203,13 +219,21 @@ Returns token, cost, latency, cache, provider, model, key, user, and team rollup
 
 Returns recent request-level usage events.
 
+### `GET /v1/access`
+
+Returns compact endpoint access events with request ID, method, path, status code, latency, auth context, and timestamp. Events do not store headers, prompts, completions, or request bodies. Requires the master key.
+
+### `GET /v1/auth/events`
+
+Returns sanitized authentication events with auth type, outcome, reason, route, model, key preview, user ID, team ID, and timestamp. Events do not store raw tokens, headers, prompts, completions, or request bodies. Requires the master key.
+
 ### `GET /v1/pricing`
 
-Returns the local pricing table used for cost estimates.
+Returns the local pricing table used for cost estimates. Requires the master key when configured.
 
 ### `GET /v1/proxy/features`
 
-Returns the gateway feature inventory used by the dashboard.
+Returns the gateway feature inventory used by the dashboard. Requires the master key when configured.
 
 ### `GET /v1/policies`
 
@@ -227,21 +251,69 @@ Returns provider status derived from request events: request count, errors, erro
 
 Returns derived operational alerts for provider error rate, provider latency, key budgets, user budgets, and team budgets.
 
+### `GET /v1/compliance/status`
+
+Returns compliance-readiness metadata, official framework source metadata, enabled technical controls, retention status, privacy-request summary counts, privacy/security contacts, subprocessor and DPA URLs, and operator-required tasks. Requires the master key.
+
+### `GET /v1/compliance/evidence`
+
+Returns a machine-readable compliance evidence map covering automated controls and operator-owned controls for GDPR, SOC 2, DPA, and India DPDP readiness. Evidence items include `mapped_requirements` and, where the gateway cannot automate the requirement, `operator_responsibilities`. Requires the master key.
+
+### `GET /v1/compliance/integrity`
+
+Returns counts and SHA-256 digests for sanitized evidence categories, including keys, users, teams, usage, audit, access, auth, and privacy-request records. Store this with release or audit evidence to match later exports without exposing raw tokens, prompts, completions, headers, or bodies. Requires the master key.
+
+### `GET /v1/compliance/report`
+
+Returns a deployment-facing readiness report with pass/fail runtime checks, implemented technical controls, evidence endpoints, official source metadata, and operator-required legal, rights-request, infrastructure, retention, incident, DPA, subprocessor, and SOC 2 attestation gates. Requires the master key.
+
+### `GET /v1/privacy/requests`
+
+Lists tracked privacy, subject-rights, DPDP, and grievance workflow requests. Supports `user_id`, `status`, and `limit` query parameters. The response also includes `supported_request_types` and `supported_statuses` for client validation. Requires the master key.
+
+### `GET /v1/privacy/consents`
+
+Lists durable consent records. Supports `user_id`, `status`, `purpose`, and `limit` query parameters. Requires the master key.
+
+### `POST /v1/privacy/consents`
+
+Creates a durable consent record with `user_id`, `purpose`, `lawful_basis`, `notice_version`, `source`, optional timestamps, status, and metadata. Supported statuses are `granted`, `withdrawn`, `revoked`, and `expired`. Requires the master key.
+
+### `PATCH /v1/privacy/consents/{consent_id}`
+
+Updates a consent record. `POST /v1/privacy/consents/{consent_id}/withdraw` marks consent as withdrawn and records a withdrawal timestamp. Requires the master key.
+
+### `POST /v1/privacy/requests`
+
+Creates a durable privacy request record with `user_id`, `request_type`, `source`, `notes`, optional `due_at`, and `metadata`. Supported request types include `access`, `erasure`, `correction`, `restriction`, `objection`, `portability`, `withdrawal`, `grievance`, `nomination`, and `appeal`. Invalid request types return `400`. Requires the master key.
+
+### `PATCH /v1/privacy/requests/{request_id}`
+
+Updates request `status`, `notes`, `due_at`, `completed_at`, or `metadata`. Supported statuses are `open`, `in_progress`, `completed`, `closed`, `denied`, and `canceled`; invalid statuses return `400`. `POST /v1/privacy/requests/{request_id}` is also supported. Requires the master key.
+
+### `GET /v1/privacy/users/{user_id}/export`
+
+Exports user-linked data for access and portability workflows. The response includes the user spend bucket, attached keys, usage events, endpoint access references, auth references tied through JSON `user_id`/`user` fields, virtual keys, or `X-User-ID`, audit target and actor references, tracked privacy requests, consent records, stored preferences, and feedback. Requires the master key.
+
+### `DELETE /v1/privacy/users/{user_id}/erase`
+
+Erases user-linked data from the control plane, user memory, and response cache. User records, attached keys, usage events tied through JSON `user_id`/`user` fields, virtual keys, or `X-User-ID`, preferences, and feedback are deleted; response-cache entries under the gateway cache prefix are cleared; audit target and actor references, endpoint access, auth, and privacy-request references are pseudonymized to preserve security and rights-request evidence without retaining the user's identifier. `POST /v1/privacy/users/{user_id}/erase` is also supported. Requires the master key.
+
 ### `POST /v1/config/reload`
 
 Reloads gateway settings from `.env`, environment variables, and the optional structured config file. Requires the master key.
 
 ## User Memory
 
-The gateway can store user preferences and feedback so future requests remember them across sessions. Redis is the default backend.
+The gateway can store user preferences and feedback so future requests remember them across sessions. User memory supports database, Redis, and in-memory backends. Database URLs can target Postgres, MySQL, MSSQL, or MongoDB.
 
 ### `GET /v1/users/{user_id}/preferences`
 
-Returns stored preferences.
+Returns stored preferences. Requires a valid master key or a virtual key scoped to the same `user_id` when gateway auth is configured.
 
 ### `PUT /v1/users/{user_id}/preferences`
 
-Creates or merges preferences.
+Creates or merges preferences. `PATCH` and `POST` on the same path are also supported. Requires a valid master key or a virtual key scoped to the same `user_id` when gateway auth is configured.
 
 ```json
 {
@@ -254,7 +326,7 @@ Creates or merges preferences.
 
 ### `POST /v1/users/{user_id}/feedback`
 
-Stores feedback for later analysis.
+Stores feedback for later analysis. Requires a valid master key or a virtual key scoped to the same `user_id` when gateway auth is configured.
 
 ```json
 {
@@ -267,7 +339,7 @@ Stores feedback for later analysis.
 
 ### `GET /v1/users/{user_id}/feedback`
 
-Returns stored feedback entries.
+Returns stored feedback entries. Requires a valid master key or a virtual key scoped to the same `user_id` when gateway auth is configured.
 
 Requests that include `user`, `user_id`, or `X-User-ID` automatically receive remembered preferences as a leading system message.
 
@@ -275,7 +347,7 @@ Requests that include `user`, `user_id`, or `X-User-ID` automatically receive re
 
 All HTTP responses include `x-request-id`. If the request includes `X-Request-ID`, the gateway echoes it; otherwise it generates one.
 
-When `JUSTFASTLLM_CORS_ALLOW_ORIGIN` is configured, responses include CORS headers for browser clients and `OPTIONS` preflight requests.
+When `JUSTFASTLLM_CORS_ALLOW_ORIGIN` is configured, responses include CORS headers for browser clients and `OPTIONS` preflight requests. The allowed methods cover `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, and `OPTIONS`. Allowed headers include `Authorization`, `Content-Type`, `X-Request-ID`, `X-User-ID`, `X-Team-ID`, `X-LLM-Provider`, `X-JustFastLLM-Key`, and the configured `JUSTFASTLLM_KEY_HEADER_NAME`.
 
 ## Error Shape
 

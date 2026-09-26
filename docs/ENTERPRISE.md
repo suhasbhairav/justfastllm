@@ -15,9 +15,10 @@ This guide describes how to run `justfastllm` as an enterprise LLM gateway with 
 | Control plane | Manages virtual keys, service-account keys, users, teams, audit events, spend, and rate limits. |
 | Policy layer | Enforces provider allow-lists, denied models, required tags, token ceilings, and response blocking. |
 | Plugin layer | Runs importable Python request/response hooks for organization-specific transformations. |
-| Cache and memory | Redis-backed response cache plus Redis-backed user preferences and feedback. |
+| Cache and memory | Database or Redis-backed response cache plus database or Redis-backed user preferences and feedback. |
 | Provider adapters | Direct HTTP adapters for OpenAI-compatible providers and a native messages adapter. |
 | Dashboard | Browser UI for usage analytics, pricing, speed, guardrails, keys, users, teams, and audit history. |
+| Compliance controls | Retention, subject export, subject erasure, compliance status, contact metadata, and audit evidence. |
 
 ## Production Topology
 
@@ -25,14 +26,15 @@ Recommended single-region deployment:
 
 | Component | Recommendation |
 | --- | --- |
-| Gateway | 1-3 container replicas behind a managed HTTPS load balancer. |
+| Gateway | One active container replica when using the built-in control-plane state store. Add an external multi-writer database before scaling write traffic horizontally. |
+| Control-plane database | Postgres, MySQL, MSSQL, MongoDB, Redis, or atomic JSON file snapshot on operator-managed encrypted storage depending on deployment maturity. |
 | Redis | Managed Redis with persistence, private networking, and TLS when available. |
-| Control-plane snapshot | Single-writer JSON snapshot volume for current file-backed mode. |
+| Control-plane state | Database or Redis-backed state snapshot for keys, users, teams, usage, spend, audit, privacy requests, and erasure evidence. |
 | Secrets | Platform secret manager or encrypted environment variables. |
 | Dashboard | Internal-only Next.js deployment or private network route. |
 | Logs | Centralized log sink with `x-request-id` indexed. |
 
-For multi-replica deployments, use one writer process for file-backed control-plane state. Redis-backed cache and user memory are already shared across replicas. Move control-plane persistence to a shared database before running multi-writer administrative traffic.
+For compliance-sensitive deployments, run one active gateway replica with the built-in Redis or file snapshot store. The built-in Redis store is durable shared storage, but it is still a whole-state snapshot, not a transactional multi-writer database. Add an external database-backed control plane before scaling write traffic horizontally.
 
 ## Security Baseline
 
@@ -44,8 +46,10 @@ Required production controls:
 - Restrict admin endpoints to internal networks where possible.
 - Enable HTTPS at the edge.
 - Set `JUSTFASTLLM_CORS_ALLOW_ORIGIN` only for approved browser origins.
-- Keep `JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH` on encrypted storage.
-- Back up the control-plane snapshot when file-backed mode is enabled.
+- Use database-backed control-plane storage in managed production deployments when available.
+- Supported database URLs include Postgres, MySQL, MSSQL, and MongoDB.
+- Keep `JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH` on encrypted storage when file-backed mode is enabled.
+- Back up the control-plane state according to the published retention and evidence policy.
 - Rotate provider keys and virtual keys on a predictable schedule.
 - Use `env:` or `file:` secret references instead of storing raw secrets in config files.
 
@@ -125,7 +129,7 @@ Use all available layers together:
 - RPM and TPM limits on high-volume keys.
 - Model allow-lists to keep expensive models behind explicit approval.
 - Model aliases to move applications between models without code changes.
-- Redis cache for repeatable non-streaming chat, embedding, completion, and rerank traffic.
+- Redis or database-backed cache for repeatable non-streaming chat, embedding, completion, and rerank traffic when policy allows response storage.
 - Dashboard spend views for monitoring drift.
 
 ## Observability
@@ -138,9 +142,17 @@ Core endpoints:
 | `/openapi.json` | Contract validation and client generation. |
 | `/v1/metrics` | Aggregate requests, tokens, cost, latency, cache, key, user, and team statistics. |
 | `/v1/usage` | Recent request-level gateway events. |
-| `/v1/audit` | Administrative changes to keys, users, and teams. |
+| `/v1/audit` | Administrative changes to keys, users, teams, privacy requests, and erasure workflows. |
+| `/v1/access` | Compact endpoint access evidence across gateway routes without headers or request bodies. |
+| `/v1/auth/events` | Sanitized authentication success, failure, and bypass evidence without raw tokens or headers. |
 | `/v1/providers/health` | Provider health, error-rate, latency, spend, and throughput status. |
 | `/v1/alerts` | Derived operational alerts for provider health and budget risk. |
+| `/v1/compliance/status` | Compliance-readiness controls, retention windows, contact metadata, and required operator tasks. |
+| `/v1/compliance/evidence` | Machine-readable control evidence map for privacy, security, SOC 2 readiness, DPA, and India DPDP readiness. |
+| `/v1/compliance/integrity` | Counts and SHA-256 digests for sanitized evidence categories to match release and audit exports. |
+| `/v1/compliance/report` | Deployment-facing readiness report with pass/fail checks, evidence endpoints, and operator-required legal/audit gates. |
+| `/v1/privacy/users/{user_id}/export` | User-linked data export for access and portability workflows. |
+| `/v1/privacy/users/{user_id}/erase` | User-linked erasure and audit pseudonymization workflow. |
 | `/v1/pricing` | Pricing table used for spend estimates. |
 | `/v1/proxy/features` | Machine-readable gateway capability map. |
 
@@ -225,8 +237,16 @@ Restart the gateway process after restoring a snapshot.
 1. Delete the virtual key with `/v1/keys`.
 2. Create a replacement key with narrower `models` and `allowed_routes`.
 3. Inspect `/v1/audit`.
-4. Inspect `/v1/usage` for anomalous activity.
+4. Inspect `/v1/auth/events` and `/v1/usage` for anomalous authentication and traffic activity.
 5. Rotate related provider credentials if provider keys may also be exposed.
+
+### Privacy Rights Request
+
+1. Verify the requester's authority through your identity workflow.
+2. Export gateway-held records with `/v1/privacy/users/{user_id}/export`.
+3. Review connected application, provider, log, backup, and analytics systems for matching records.
+4. Erase gateway-held records with `/v1/privacy/users/{user_id}/erase` when erasure is valid.
+5. Retain the pseudonymized audit trail for security evidence.
 
 ### Guardrail Escalation
 
@@ -256,10 +276,20 @@ Recommended release checklist:
 - Confirm Redis connectivity.
 - Confirm control-plane backup path.
 - Confirm deployment health check.
+- Confirm `/v1/compliance/status` shows the expected contacts, retention windows, and controls.
+- Export `/v1/compliance/report` and `/v1/compliance/integrity` after every production deployment and retain them with release evidence.
+
+## Compliance Readiness
+
+See [Compliance Readiness](COMPLIANCE.md) for GDPR, SOC 2, and India DPDP readiness mappings.
+
+`justfastllm` automates gateway-level technical controls such as retention, export, erasure, audit, auth, redaction, policies, and guardrails. Legal compliance and SOC 2 attestation still require the deploying organization to maintain privacy notices, contracts, subprocessors, incident processes, access reviews, cloud controls, and independent audit evidence.
+
+Use [Data Processing Addendum Template](DPA_TEMPLATE.md) as a counsel-reviewed starting point for customer processing terms.
 
 ## Current Enterprise Limits
 
-- File-backed control-plane persistence is single-writer.
-- Shared Redis persistence exists for cache and user memory, not yet for the full control plane.
+- Built-in control-plane persistence is single-writer. Use Redis-backed state for managed durability, and add an external database-backed control plane before running multiple active writer replicas.
 - Role-based dashboard users should be enforced by the deployment access layer.
 - Long-term warehouse exports are not yet built in.
+- Legal compliance and SOC 2 reports are not created automatically; the gateway supplies technical controls and evidence surfaces.

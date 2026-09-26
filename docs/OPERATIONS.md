@@ -11,38 +11,55 @@ For production architecture, access controls, SLO guidance, backup/restore, and 
 - Process model: ASGI app served by Uvicorn.
 - Runtime dependency: `uvicorn`.
 - Provider access: direct HTTP calls only; no provider SDKs.
-- Cache: Redis by default.
-- User memory: Redis by default.
+- Cache: Redis by default, or database-backed for Postgres, MySQL, MSSQL, and MongoDB deployments.
+- User memory: database or Redis-backed by default for production, with in-memory fallback for tests.
+- Control-plane state: database or Redis-backed production snapshot, or an atomic JSON snapshot on operator-managed encrypted storage for single-node deployments.
 - Local fallback for tests: in-memory cache and memory store.
 
 ## Deployment Checklist
 
 1. Create `.env` from `.env.example`.
 2. Configure provider API keys.
-3. Configure `REDIS_URL`.
-4. Set `JUSTFASTLLM_CACHE_BACKEND=redis`.
-5. Set `JUSTFASTLLM_USER_MEMORY_BACKEND=redis`.
+3. Configure a managed database URL for Postgres, MySQL, MSSQL, or MongoDB.
+4. Set `JUSTFASTLLM_CACHE_BACKEND=database` with Postgres, MySQL, MSSQL, or MongoDB for durable cache storage, or `redis` for simpler shared cache deployments.
+5. Set `JUSTFASTLLM_USER_MEMORY_BACKEND=database` with Postgres, MySQL, MSSQL, or MongoDB, or `redis` for simpler deployments.
 6. Set `JUSTFASTLLM_MASTER_KEY` before exposing admin routes.
-7. Set `JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH` for single-node state persistence.
-8. Configure CORS only when browser clients need it.
-9. Run the standard test suite.
-10. Run Ollama integration tests for major gateway changes.
-11. Build and deploy the Docker image.
+7. Set `JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND=database` with Postgres, MySQL, MSSQL, or MongoDB for durable production state; use `redis` for single-writer managed state, or `file` plus `JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH` for single-node persistence.
+8. Set privacy/security contacts, subprocessor URL, and DPA URL.
+9. Set `JUSTFASTLLM_REQUIRE_COMPLIANCE_READY=true` for production deployment health checks.
+10. Configure CORS only when browser clients need it.
+11. Run the standard test suite.
+12. Run Ollama integration tests for major gateway changes.
+13. Build and deploy the Docker image.
 
 ## Recommended Production Settings
 
 ```bash
 JUSTFASTLLM_LOG_LEVEL=INFO
 JUSTFASTLLM_CACHE_ENABLED=true
-JUSTFASTLLM_CACHE_BACKEND=redis
+JUSTFASTLLM_CACHE_BACKEND=database
+JUSTFASTLLM_CACHE_DATABASE_URL=postgresql+psycopg://user:pass@postgres:5432/justfastllm
+JUSTFASTLLM_CACHE_DATABASE_TABLE=justfastllm_response_cache
 JUSTFASTLLM_CACHE_TTL_SECONDS=60
 JUSTFASTLLM_CACHE_MAX_ITEMS=1024
 JUSTFASTLLM_USER_MEMORY_ENABLED=true
-JUSTFASTLLM_USER_MEMORY_BACKEND=redis
+JUSTFASTLLM_USER_MEMORY_BACKEND=database
+JUSTFASTLLM_USER_MEMORY_DATABASE_URL=postgresql+psycopg://user:pass@postgres:5432/justfastllm
+JUSTFASTLLM_USER_MEMORY_DATABASE_TABLE=justfastllm_user_memory
 JUSTFASTLLM_GUARDRAILS_ENABLED=true
 JUSTFASTLLM_MASTER_KEY=change-me
-JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH=.justfastllm/proxy-control.json
-REDIS_URL=redis://redis:6379/0
+JUSTFASTLLM_CONTROL_PLANE_STORAGE_BACKEND=database
+JUSTFASTLLM_CONTROL_PLANE_DATABASE_URL=postgresql+psycopg://user:pass@postgres:5432/justfastllm
+JUSTFASTLLM_CONTROL_PLANE_DATABASE_TABLE=justfastllm_control_plane_state
+JUSTFASTLLM_COMPLIANCE_MODE=true
+JUSTFASTLLM_REQUIRE_COMPLIANCE_READY=true
+JUSTFASTLLM_CACHE_PERSONAL_DATA_ALLOWED=false
+JUSTFASTLLM_USAGE_RETENTION_DAYS=90
+JUSTFASTLLM_AUDIT_RETENTION_DAYS=365
+JUSTFASTLLM_PRIVACY_CONTACT=privacy@example.com
+JUSTFASTLLM_SECURITY_CONTACT=security@example.com
+JUSTFASTLLM_SUBPROCESSORS_URL=https://example.com/subprocessors
+JUSTFASTLLM_DPA_URL=https://example.com/dpa
 ```
 
 Use `JUSTFASTLLM_CONFIG_FILE=config.example.yaml` when structured configuration is easier to review than a long environment-variable list. Keep production secrets in your platform secret manager and let environment variables override config-file defaults.
@@ -66,6 +83,12 @@ curl http://localhost:8000/health
 curl http://localhost:8000/openapi.json
 ```
 
+When `JUSTFASTLLM_REQUIRE_COMPLIANCE_READY=true`, `/health` returns `503` until required compliance-readiness settings are configured. The gate checks compliance mode, master key, retention windows, durable control-plane storage, a real control-plane evidence write with matching readback, write/read verified durable enabled user memory, write/read verified enabled response-cache storage, privacy/security contacts, subprocessor URL, DPA URL, CORS, and cache minimization. Inspect the missing checks:
+
+```bash
+curl http://localhost:8000/health
+```
+
 Use `/openapi.json` for client generation, API review, and gateway contract validation.
 
 ## Guardrail Operations
@@ -73,13 +96,15 @@ Use `/openapi.json` for client generation, API review, and gateway contract vali
 Inspect guardrails:
 
 ```bash
-curl http://localhost:8000/v1/guardrails
+curl http://localhost:8000/v1/guardrails \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY"
 ```
 
 Disable a specific check:
 
 ```bash
 curl -X PATCH http://localhost:8000/v1/guardrails \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"disable":["block_patterns"]}'
 ```
@@ -88,6 +113,7 @@ Disable all guardrails temporarily:
 
 ```bash
 curl -X PATCH http://localhost:8000/v1/guardrails \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"enabled":false}'
 ```
@@ -176,7 +202,7 @@ Build:
 docker build -t justfastllm:local .
 ```
 
-Run with Redis:
+Run with Postgres:
 
 ```bash
 docker compose --env-file .env up --build

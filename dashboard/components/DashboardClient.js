@@ -38,6 +38,7 @@ const fallback = {
   plugins: { loaded: [] },
   providerHealth: { data: [] },
   alerts: { data: [] },
+  compliance: { controls: {}, retention: {}, operator_required: [] },
 };
 
 export default function DashboardClient() {
@@ -70,7 +71,7 @@ export default function DashboardClient() {
     setLoading(true);
     setError("");
     try {
-      const [metrics, usage, pricing, guardrails, features, keys, users, teams, policies, plugins, providerHealth, alerts] = await Promise.all([
+      const [metrics, usage, pricing, guardrails, features, keys, users, teams, policies, plugins, providerHealth, alerts, compliance] = await Promise.all([
         getJson(gatewayUrl, "/v1/metrics", headers),
         getJson(gatewayUrl, "/v1/usage", headers),
         getJson(gatewayUrl, "/v1/pricing", headers),
@@ -83,9 +84,10 @@ export default function DashboardClient() {
         getJson(gatewayUrl, "/v1/plugins", headers).catch(() => ({ loaded: [] })),
         getJson(gatewayUrl, "/v1/providers/health", headers).catch(() => ({ data: [] })),
         getJson(gatewayUrl, "/v1/alerts", headers).catch(() => ({ data: [] })),
+        getJson(gatewayUrl, "/v1/compliance/status", headers).catch(() => ({ controls: {}, retention: {}, operator_required: [] })),
       ]);
       const audit = await getJson(gatewayUrl, "/v1/audit", headers).catch(() => ({ data: [] }));
-      setData({ metrics, usage, pricing, guardrails, features, keys, users, teams, audit, policies, plugins, providerHealth, alerts });
+      setData({ metrics, usage, pricing, guardrails, features, keys, users, teams, audit, policies, plugins, providerHealth, alerts, compliance });
     } catch (err) {
       setError(err.message || "Unable to load gateway dashboard data.");
     } finally {
@@ -172,6 +174,9 @@ export default function DashboardClient() {
   const pluginRows = (data.plugins.loaded || []).map((name) => ({ name }));
   const providerHealth = data.providerHealth.data || [];
   const alerts = data.alerts.data || [];
+  const complianceControls = Object.entries(data.compliance.controls || {});
+  const retentionRows = Object.entries(data.compliance.retention || {}).map(([name, value]) => ({ name, value }));
+  const operatorRequired = (data.compliance.operator_required || []).map((task) => ({ task }));
 
   return (
     <main className="shell">
@@ -457,6 +462,32 @@ export default function DashboardClient() {
                 ["target", "Target"],
                 ["message", "Message"],
               ]}
+            />
+          </Card>
+        </div>
+
+        <div className="tables">
+          <Card label="Compliance" title="Technical controls">
+            <div className="feature-grid">
+              {complianceControls.map(([name, enabled]) => (
+                <div className="feature" key={name}>
+                  <span>{humanize(name)}</span>
+                  <span className={enabled ? "ok" : "warn"}>{enabled ? "Yes" : "No"}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <Card label="Retention" title="Lifecycle and operator tasks">
+            <Table
+              rows={retentionRows}
+              columns={[
+                ["name", "Setting"],
+                ["value", "Value"],
+              ]}
+            />
+            <Table
+              rows={operatorRequired.slice(0, 5)}
+              columns={[["task", "Operator task"]]}
             />
           </Card>
         </div>
