@@ -156,6 +156,10 @@ npm run dev
 
 By default the dashboard connects to `http://localhost:8000`. Set `NEXT_PUBLIC_GATEWAY_URL` for another gateway URL.
 
+### Dashboard Screenshot
+
+![justfastllm dashboard desktop](docs/assets/dashboard-overview.png)
+
 ## Benchmark Snapshot
 
 Measured locally on September 26, 2026 with Python's in-process ASGI path. The added-latency benchmark isolates gateway overhead by using a deterministic in-process upstream provider, so the numbers below exclude OpenAI network time and model generation time.
