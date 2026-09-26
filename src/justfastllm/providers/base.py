@@ -16,3 +16,6 @@ class ProviderClient(Protocol):
 
     async def models(self) -> UpstreamResponse:
         """List models from the provider."""
+
+    async def openai_endpoint(self, endpoint: str, body: bytes, content_type: str) -> UpstreamResponse:
+        """Send a raw OpenAI-compatible request to a provider endpoint."""

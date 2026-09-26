@@ -31,6 +31,14 @@ OpenAI-compatible chat completion proxy.
 
 Provider can also be selected through `X-LLM-Provider` or a model prefix such as `ollama/llama3.1`.
 
+## `POST /v1/completions`
+
+OpenAI-compatible text completions proxy. The request body is forwarded to the selected provider after gateway fields such as `provider`, `fallback_providers`, `mirror_provider`, and `tags` are removed.
+
+## `POST /v1/responses`
+
+OpenAI-compatible responses proxy for providers that expose a responses-style endpoint.
+
 ## `POST /v1/messages`
 
 Messages-style proxy. Anthropic requests are sent to `/v1/messages`; OpenAI-compatible providers are routed to chat completions.
@@ -106,6 +114,122 @@ Runs a minimal gateway-managed agent request. The gateway can execute selected s
 ```
 
 The provider response is returned directly.
+
+## Additional OpenAI-Compatible Endpoints
+
+These routes are proxied to the selected provider and use the same virtual-key authentication, model access, budget, rate-limit, fallback, usage, and spend accounting path as chat traffic.
+
+| Route | Notes |
+| --- | --- |
+| `POST /v1/embeddings` | JSON request body; cacheable for repeated embedding inputs. |
+| `POST /v1/images/generations` | JSON request body for image generation. |
+| `POST /v1/images/edits` | Supports raw multipart pass-through. |
+| `POST /v1/images/variations` | Supports raw multipart pass-through. |
+| `POST /v1/audio/transcriptions` | Supports raw multipart pass-through. |
+| `POST /v1/audio/translations` | Supports raw multipart pass-through. |
+| `POST /v1/moderations` | JSON request body for moderation models. |
+| `POST /v1/rerank` | JSON request body; cacheable for repeated rerank inputs. |
+| `POST /rerank` | Alias for `/v1/rerank`. |
+
+For JSON bodies, provider selection works through `provider`, `X-LLM-Provider`, model prefix, or `JUSTFASTLLM_DEFAULT_PROVIDER`. For multipart bodies, use `X-LLM-Provider` or the default provider because multipart payloads are forwarded as raw bytes.
+
+## Proxy Control Plane
+
+Set `JUSTFASTLLM_MASTER_KEY` to require a master key for administrative routes and virtual keys for gateway traffic. See [Proxy Control Plane](PROXY_CONTROL_PLANE.md) for end-to-end examples.
+
+### `GET /v1/keys`
+
+Lists virtual keys. Requires the master key when configured.
+
+### `POST /v1/keys`
+
+Creates a virtual key with optional model access, budget, RPM, TPM, aliases, user, team, and metadata.
+
+```json
+{
+  "name": "production-app",
+  "user_id": "user-1",
+  "team_id": "platform",
+  "models": ["gpt-5-nano"],
+  "allowed_routes": ["chat", "embeddings"],
+  "budget_usd": 25,
+  "rpm_limit": 120,
+  "tpm_limit": 120000,
+  "aliases": {"fast": "gpt-5-nano"}
+}
+```
+
+### `POST /v1/keys/info`
+
+Returns public key metadata and spend. `GET /key/info?key=...` is also supported.
+
+### `DELETE /v1/keys`
+
+Deletes a virtual key. `DELETE /v1/keys?key=...` and `POST /key/delete` are also supported.
+
+### `POST /v1/proxy/users`
+
+Creates a user spend bucket.
+
+### `GET /v1/proxy/users`
+
+Lists user spend buckets.
+
+### `GET /v1/proxy/users/info`
+
+Returns user spend and attached keys. Accepts `user_id` as a query parameter.
+
+### `POST /v1/proxy/teams`
+
+Creates a team spend bucket.
+
+### `GET /v1/proxy/teams`
+
+Lists team spend buckets.
+
+### `GET /v1/proxy/teams/info`
+
+Returns team spend and attached keys. Accepts `team_id` as a query parameter.
+
+### `POST /v1/service-accounts/keys`
+
+Creates a service-account key for automation jobs.
+
+### `GET /v1/metrics`
+
+Returns token, cost, latency, cache, provider, model, key, user, and team rollups.
+
+### `GET /v1/usage`
+
+Returns recent request-level usage events.
+
+### `GET /v1/pricing`
+
+Returns the local pricing table used for cost estimates.
+
+### `GET /v1/proxy/features`
+
+Returns the gateway feature inventory used by the dashboard.
+
+### `GET /v1/policies`
+
+Returns runtime request and response policy configuration.
+
+### `GET /v1/plugins`
+
+Returns loaded plugin hook modules.
+
+### `GET /v1/providers/health`
+
+Returns provider status derived from request events: request count, errors, error rate, latency percentiles, tokens, spend, and last-seen timestamp.
+
+### `GET /v1/alerts`
+
+Returns derived operational alerts for provider error rate, provider latency, key budgets, user budgets, and team budgets.
+
+### `POST /v1/config/reload`
+
+Reloads gateway settings from `.env`, environment variables, and the optional structured config file. Requires the master key.
 
 ## User Memory
 

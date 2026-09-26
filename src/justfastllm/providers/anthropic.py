@@ -59,6 +59,14 @@ class AnthropicProvider:
         )
         return await asyncio.to_thread(self.http_client.send, request)
 
+    async def openai_endpoint(self, endpoint: str, body: bytes, content_type: str) -> UpstreamResponse:
+        if endpoint.strip("/") == "messages":
+            payload = loads_bytes(body) if body else {}
+            if not isinstance(payload, dict):
+                raise BadRequestError("JSON body must be an object")
+            return await self.messages(payload)
+        raise BadRequestError(f"endpoint '{endpoint}' is not supported by provider '{self.config.name}'")
+
     async def _send_messages(self, payload: dict[str, object]) -> UpstreamResponse:
         request = HttpRequest(
             method="POST",

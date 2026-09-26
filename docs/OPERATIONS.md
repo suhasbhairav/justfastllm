@@ -4,6 +4,8 @@ Created by [Suhas Bhairav](https://suhasbhairav.com).
 
 This guide is for running `justfastllm` as an enterprise gateway service.
 
+For production architecture, access controls, SLO guidance, backup/restore, and incident runbooks, see [Enterprise Guide](ENTERPRISE.md).
+
 ## Runtime Profile
 
 - Process model: ASGI app served by Uvicorn.
@@ -20,10 +22,12 @@ This guide is for running `justfastllm` as an enterprise gateway service.
 3. Configure `REDIS_URL`.
 4. Set `JUSTFASTLLM_CACHE_BACKEND=redis`.
 5. Set `JUSTFASTLLM_USER_MEMORY_BACKEND=redis`.
-6. Configure CORS only when browser clients need it.
-7. Run the standard test suite.
-8. Run Ollama integration tests for major gateway changes.
-9. Build and deploy the Docker image.
+6. Set `JUSTFASTLLM_MASTER_KEY` before exposing admin routes.
+7. Set `JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH` for single-node state persistence.
+8. Configure CORS only when browser clients need it.
+9. Run the standard test suite.
+10. Run Ollama integration tests for major gateway changes.
+11. Build and deploy the Docker image.
 
 ## Recommended Production Settings
 
@@ -36,8 +40,12 @@ JUSTFASTLLM_CACHE_MAX_ITEMS=1024
 JUSTFASTLLM_USER_MEMORY_ENABLED=true
 JUSTFASTLLM_USER_MEMORY_BACKEND=redis
 JUSTFASTLLM_GUARDRAILS_ENABLED=true
+JUSTFASTLLM_MASTER_KEY=change-me
+JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH=.justfastllm/proxy-control.json
 REDIS_URL=redis://redis:6379/0
 ```
+
+Use `JUSTFASTLLM_CONFIG_FILE=config.example.yaml` when structured configuration is easier to review than a long environment-variable list. Keep production secrets in your platform secret manager and let environment variables override config-file defaults.
 
 ## Observability
 
@@ -83,6 +91,67 @@ curl -X PATCH http://localhost:8000/v1/guardrails \
   -H "Content-Type: application/json" \
   -d '{"enabled":false}'
 ```
+
+## Proxy Control Plane Operations
+
+Create a virtual key:
+
+```bash
+curl -X POST http://localhost:8000/v1/keys \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"app","models":["gpt-5-nano"],"budget_usd":25,"rpm_limit":120}'
+```
+
+Inspect metrics:
+
+```bash
+curl http://localhost:8000/v1/metrics \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY"
+```
+
+Inspect provider health and alerts:
+
+```bash
+curl http://localhost:8000/v1/providers/health \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY"
+
+curl http://localhost:8000/v1/alerts \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY"
+```
+
+Inspect policies and plugins:
+
+```bash
+curl http://localhost:8000/v1/policies \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY"
+
+curl http://localhost:8000/v1/plugins \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY"
+```
+
+Reload gateway configuration:
+
+```bash
+curl -X POST http://localhost:8000/v1/config/reload \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY"
+```
+
+Back up the control-plane snapshot if file-backed mode is enabled:
+
+```bash
+cp .justfastllm/proxy-control.json .justfastllm/proxy-control.backup.json
+```
+
+Run the dashboard:
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` and enter the gateway URL plus master key.
 
 ## Redis Operations
 

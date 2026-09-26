@@ -60,6 +60,7 @@ Use it when you want:
 | Layer | Capability |
 | --- | --- |
 | Gateway | OpenAI-style `/v1/chat/completions`, `/v1/messages`, model listing, provider routing |
+| Endpoint Coverage | Chat, messages, completions, responses, embeddings, images, audio, moderation, rerank |
 | Providers | OpenAI, Anthropic, DeepSeek, xAI Grok, Qwen, Kimi / Moonshot, Ollama |
 | Extensibility | Factory Pattern via `ProviderFactory`, plus env-driven OpenAI-compatible providers |
 | Operations | Health checks, structured request logging, request IDs, Docker health checks |
@@ -67,7 +68,89 @@ Use it when you want:
 | Scale | Redis cache and Redis-backed user memory for multi-instance deployments |
 | Safety | Request validation, configurable guardrails, runtime guardrail enable/disable endpoint |
 | Product Features | Agents, skills, persistent preferences, feedback capture |
+| Control Plane | Master key, virtual keys, service-account keys, model access, budgets, RPM/TPM limits |
+| Analytics | Token, pricing, spend, cache, latency, user, team, model, and provider rollups |
+| Dashboard | Next.js App Router dashboard for operations, pricing, speed, guardrails, usage, and keys |
+| Configuration | `.env` plus optional structured YAML/JSON config file |
+| Enterprise Controls | Secret references, policies, plugin hooks, audit log, and runtime config reload |
 | Contracts | `/openapi.json`, documented endpoints, `.env.example`, deployment descriptors |
+
+## Gateway Control Plane
+
+`justfastllm` includes an admin control plane for operating a shared LLM gateway across applications, teams, and service accounts.
+
+| Feature | Endpoint |
+| --- | --- |
+| Generate/list/delete virtual keys | `/v1/keys`, `/key/generate`, `/key/info`, `/key/delete` |
+| Per-key model access | `models` on key creation |
+| Per-key budgets | `budget_usd` on key creation |
+| Per-key RPM and TPM limits | `rpm_limit`, `tpm_limit` on key creation |
+| Model aliases | `aliases` on key creation |
+| Users and spend buckets | `/v1/proxy/users`, `/user/new`, `/user/info` |
+| Teams and spend buckets | `/v1/proxy/teams`, `/team/new`, `/team/info`, `/team/list` |
+| Service-account keys | `/v1/service-accounts/keys`, `/service_account/key/generate` |
+| Metrics and usage | `/v1/metrics`, `/v1/usage`, `/v1/pricing`, `/v1/proxy/features` |
+| Fallback routing | `JUSTFASTLLM_FALLBACK_PROVIDERS` or `fallback_providers` in request JSON |
+| Traffic mirroring | `JUSTFASTLLM_MIRROR_PROVIDER` or `mirror_provider` in request JSON |
+
+Set a master key to protect administrative routes and require virtual-key authentication for gateway traffic:
+
+```bash
+JUSTFASTLLM_MASTER_KEY=change-me
+JUSTFASTLLM_KEY_HEADER_NAME=authorization
+JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH=.justfastllm/proxy-control.json
+```
+
+Create a key:
+
+```bash
+curl -X POST http://localhost:8000/v1/keys \
+  -H "Authorization: Bearer $JUSTFASTLLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "production-app",
+    "user_id": "user-1",
+    "team_id": "platform",
+    "models": ["gpt-5-nano"],
+    "budget_usd": 25,
+    "rpm_limit": 120,
+    "tpm_limit": 120000,
+    "aliases": {"fast": "gpt-5-nano"}
+  }'
+```
+
+Route-level controls are available with `allowed_routes`. Supported route names are `chat`, `messages`, `completions`, `responses`, `embeddings`, `images`, `audio`, `moderations`, `rerank`, and `agents`.
+
+Policies and plugin hooks are executable at runtime:
+
+```bash
+JUSTFASTLLM_POLICY_ALLOWED_PROVIDERS=openai,ollama
+JUSTFASTLLM_POLICY_REQUIRED_TAGS=prod
+JUSTFASTLLM_PLUGIN_MODULES=my_gateway_plugin
+```
+
+Provider keys and the master key can use secret references:
+
+```bash
+OPENAI_API_KEY=env:OPENAI_SECRET_NAME
+JUSTFASTLLM_MASTER_KEY=file:/run/secrets/gateway_master_key
+```
+
+## Dashboard
+
+The repository includes a Next.js + JavaScript + App Router dashboard in [`dashboard`](dashboard). It connects to the gateway APIs and visualizes requests, tokens, estimated spend, latency percentiles, provider/model distribution, virtual keys, guardrails, pricing, users, and teams.
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+By default the dashboard connects to `http://localhost:8000`. Set `NEXT_PUBLIC_GATEWAY_URL` for another gateway URL.
+
+### Dashboard Screenshots
+
+![justfastllm dashboard desktop](docs/assets/dashboard-overview.png)
 
 ## Benchmark Snapshot
 
@@ -165,7 +248,7 @@ The real model latency numbers are end-to-end gateway-to-OpenAI timings. They va
 | AWS | `deploy/aws/AppRunner.yaml` | App Runner service backed by an ECR image |
 | GCP | `deploy/gcp/cloudrun-service.yaml` | Cloud Run service with Secret Manager Redis URL |
 
-See [Deployment](docs/DEPLOYMENT.md), [Docker](docs/DOCKER.md), and [Operations](docs/OPERATIONS.md) for complete platform guidance.
+See [Enterprise](docs/ENTERPRISE.md), [Deployment](docs/DEPLOYMENT.md), [Docker](docs/DOCKER.md), and [Operations](docs/OPERATIONS.md) for complete platform guidance.
 
 ## Quick Start
 
@@ -249,6 +332,12 @@ For local tests or single-process development:
 ```bash
 JUSTFASTLLM_CACHE_BACKEND=memory
 JUSTFASTLLM_USER_MEMORY_BACKEND=memory
+```
+
+Use a structured config file when environment variables become too noisy:
+
+```bash
+JUSTFASTLLM_CONFIG_FILE=config.example.yaml
 ```
 
 Add any OpenAI-compatible provider without writing code:

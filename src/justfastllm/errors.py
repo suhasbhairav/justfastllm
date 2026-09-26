@@ -26,6 +26,16 @@ class ProviderAuthError(GatewayError):
     code = "provider_auth_missing"
 
 
+class UnauthorizedError(GatewayError):
+    status_code = 401
+    code = "unauthorized"
+
+
+class ForbiddenError(GatewayError):
+    status_code = 403
+    code = "forbidden"
+
+
 class ProviderConfigurationError(GatewayError):
     status_code = 500
     code = "provider_misconfigured"
@@ -41,6 +51,21 @@ class GuardrailViolationError(GatewayError):
     code = "guardrail_violation"
 
 
+class PolicyViolationError(GatewayError):
+    status_code = 403
+    code = "policy_violation"
+
+
 class PayloadTooLargeError(GatewayError):
     status_code = 413
     code = "payload_too_large"
+
+
+class RateLimitError(GatewayError):
+    status_code = 429
+    code = "rate_limit_exceeded"
+
+
+class BudgetExceededError(GatewayError):
+    status_code = 429
+    code = "budget_exceeded"

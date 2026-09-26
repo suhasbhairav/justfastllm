@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import json
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -90,8 +93,10 @@ async def asgi_request(
     path: str,
     payload: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    raw_body: bytes | None = None,
 ):
-    body = dumps_bytes(payload) if payload is not None else b""
+    path_only, _, raw_query = path.partition("?")
+    body = raw_body if raw_body is not None else (dumps_bytes(payload) if payload is not None else b"")
     messages = [{"type": "http.request", "body": body, "more_body": False}]
     sent: list[dict[str, Any]] = []
     raw_headers = [(b"content-type", b"application/json")]
@@ -108,7 +113,8 @@ async def asgi_request(
         {
             "type": "http",
             "method": method,
-            "path": path,
+            "path": path_only,
+            "query_string": raw_query.encode("latin-1"),
             "headers": raw_headers,
         },
         receive,
@@ -166,6 +172,25 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.body, b"")
         self.assertEqual(request.headers["Authorization"], "Bearer openai-key")
 
+    async def test_openai_compatible_provider_proxies_generic_endpoint(self) -> None:
+        cfg = settings().providers["openai"]
+        http = FakeHttpClient()
+        provider = OpenAICompatibleProvider(cfg, http)
+
+        await provider.openai_endpoint(
+            "embeddings",
+            dumps_bytes({"provider": "openai", "input": "hello", "model": "text-embedding-3-small"}),
+            "application/json",
+        )
+
+        request = http.requests[0]
+        body = loads_bytes(request.body)
+        self.assertEqual(request.url, "https://api.openai.com/v1/embeddings")
+        self.assertEqual(request.headers["Authorization"], "Bearer openai-key")
+        self.assertEqual(body["input"], "hello")
+        self.assertEqual(body["model"], "text-embedding-3-small")
+        self.assertNotIn("provider", body)
+
     async def test_anthropic_chat_normalizes_to_openai_shape(self) -> None:
         response = UpstreamResponse(
             status_code=200,
@@ -214,6 +239,65 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FactoryAndCacheTests(unittest.TestCase):
+    def test_settings_can_load_structured_config_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "gateway.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "server": {"host": "127.0.0.1", "port": 9000},
+                        "gateway": {
+                            "default_provider": "ollama",
+                            "cache": {"backend": "memory", "ttl_seconds": 12},
+                            "control_plane": {
+                                "master_key": "from-config",
+                                "storage_path": str(Path(tmpdir) / "state.json"),
+                                "fallback_providers": ["openai"],
+                            },
+                        },
+                        "providers": {
+                            "openai": {"api_key": "config-openai", "model": "gpt-5-mini"},
+                            "ollama": {"base_url": "http://localhost:11434/v1", "model": "llama3.1"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = load_settings(
+                env_file=Path("/tmp/justfastllm-missing.env"),
+                environ={"JUSTFASTLLM_CONFIG_FILE": str(config_path), "JUSTFASTLLM_DEFAULT_PROVIDER": "openai"},
+            )
+
+        self.assertEqual(loaded.host, "127.0.0.1")
+        self.assertEqual(loaded.port, 9000)
+        self.assertEqual(loaded.default_provider, "openai")
+        self.assertEqual(loaded.cache_backend, "memory")
+        self.assertEqual(loaded.cache_ttl_seconds, 12)
+        self.assertEqual(loaded.master_key, "from-config")
+        self.assertEqual(loaded.fallback_providers, ("openai",))
+        self.assertEqual(loaded.providers["openai"].api_key, "config-openai")
+        self.assertEqual(loaded.providers["openai"].default_model, "gpt-5-mini")
+
+    def test_settings_resolves_env_and_file_secret_references(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secret_path = Path(tmpdir) / "anthropic-secret"
+            secret_path.write_text("anthropic-from-file\n", encoding="utf-8")
+            loaded = load_settings(
+                env_file=Path("/tmp/justfastllm-missing.env"),
+                environ={
+                    "OPENAI_API_KEY": "env:REAL_OPENAI_KEY",
+                    "REAL_OPENAI_KEY": "openai-from-env",
+                    "ANTHROPIC_API_KEY": f"file:{secret_path}",
+                    "JUSTFASTLLM_MASTER_KEY": "env:MASTER_KEY",
+                    "MASTER_KEY": "master-from-env",
+                },
+            )
+
+        self.assertEqual(loaded.providers["openai"].api_key, "openai-from-env")
+        self.assertEqual(loaded.providers["anthropic"].api_key, "anthropic-from-file")
+        self.assertEqual(loaded.master_key, "master-from-env")
+
     def test_factory_uses_pooled_http_client_by_default(self) -> None:
         factory = ProviderFactory(settings())
 
@@ -435,6 +519,23 @@ class GatewayAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["access-control-allow-origin"], "*")
         self.assertIn("x-request-id", headers)
 
+    async def test_options_preflight_bypasses_protected_routes(self) -> None:
+        app = create_app(
+            settings=settings(
+                JUSTFASTLLM_CORS_ALLOW_ORIGIN="https://dashboard.example.test",
+                JUSTFASTLLM_MASTER_KEY="master-key",
+            ),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60),
+            logger=logging.getLogger("test"),
+        )
+
+        status, headers, body = await asgi_request(app, "OPTIONS", "/v1/keys")
+
+        self.assertEqual(status, 204)
+        self.assertEqual(body, b"")
+        self.assertEqual(headers["access-control-allow-origin"], "https://dashboard.example.test")
+        self.assertIn("authorization", headers["access-control-allow-headers"])
+
     async def test_chat_completion_is_cached(self) -> None:
         http = FakeHttpClient()
         resolved_settings = settings()
@@ -454,6 +555,622 @@ class GatewayAppTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first[1]["x-justfastllm-cache"], "miss")
         self.assertEqual(second[1]["x-justfastllm-cache"], "hit")
         self.assertEqual(len(http.requests), 1)
+
+    async def test_virtual_key_generation_enforces_model_access_and_records_metrics(self) -> None:
+        http = FakeHttpClient()
+        resolved_settings = settings(JUSTFASTLLM_MASTER_KEY="master-key")
+        app = create_app(
+            settings=resolved_settings,
+            provider_factory=ProviderFactory(resolved_settings, http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+
+        unauth_status, _, unauth_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            {"provider": "openai", "model": "gpt-5-nano", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        key_status, _, key_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/keys",
+            {"name": "app", "models": ["gpt-5-nano"], "rpm_limit": 10, "budget_usd": 1},
+            headers={"authorization": "Bearer master-key"},
+        )
+        token = loads_bytes(key_body)["key"]
+        chat_status, chat_headers, _ = await asgi_request(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            {"provider": "openai", "model": "gpt-5-nano", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"authorization": f"Bearer {token}"},
+        )
+        blocked_status, _, blocked_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            {"provider": "openai", "model": "blocked-model", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"authorization": f"Bearer {token}"},
+        )
+        metrics_status, _, metrics_body = await asgi_request(
+            app,
+            "GET",
+            "/v1/metrics",
+            headers={"authorization": "Bearer master-key"},
+        )
+
+        self.assertEqual(unauth_status, 401)
+        self.assertEqual(loads_bytes(unauth_body)["error"]["code"], "unauthorized")
+        self.assertEqual(key_status, 201)
+        self.assertEqual(chat_status, 200)
+        self.assertIn("x-justfastllm-call-id", chat_headers)
+        self.assertIn("x-justfastllm-cost-usd", chat_headers)
+        self.assertEqual(blocked_status, 403)
+        self.assertEqual(loads_bytes(blocked_body)["error"]["code"], "forbidden")
+        metrics = loads_bytes(metrics_body)
+        self.assertEqual(metrics_status, 200)
+        self.assertEqual(metrics["requests"], 1)
+        self.assertIn("gpt-5-nano", metrics["by_model"])
+
+    async def test_virtual_key_rpm_and_budget_limits_are_enforced(self) -> None:
+        http = FakeHttpClient()
+        resolved_settings = settings(JUSTFASTLLM_MASTER_KEY="master-key")
+        app = create_app(
+            settings=resolved_settings,
+            provider_factory=ProviderFactory(resolved_settings, http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+        key_status, _, key_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/keys",
+            {"name": "limited", "models": ["*"], "rpm_limit": 1, "budget_usd": 0.00000001},
+            headers={"authorization": "Bearer master-key"},
+        )
+        token = loads_bytes(key_body)["key"]
+        payload = {"provider": "openai", "model": "gpt-5-nano", "messages": [{"role": "user", "content": "hi"}]}
+
+        first_status, _, _ = await asgi_request(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            payload,
+            headers={"authorization": f"Bearer {token}"},
+        )
+        second_status, _, second_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            payload,
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(key_status, 201)
+        self.assertEqual(first_status, 200)
+        self.assertEqual(second_status, 429)
+        self.assertEqual(loads_bytes(second_body)["error"]["code"], "rate_limit_exceeded")
+
+    async def test_virtual_key_allowed_routes_are_enforced_for_agent_runs(self) -> None:
+        http = FakeHttpClient()
+        resolved_settings = settings(JUSTFASTLLM_MASTER_KEY="master-key")
+        app = create_app(
+            settings=resolved_settings,
+            provider_factory=ProviderFactory(resolved_settings, http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+        _, _, key_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/keys",
+            {"name": "chat-only", "models": ["*"], "allowed_routes": ["chat"], "budget_usd": 1},
+            headers={"authorization": "Bearer master-key"},
+        )
+        token = loads_bytes(key_body)["key"]
+
+        chat_status, _, _ = await asgi_request(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            {"provider": "openai", "model": "gpt-5-nano", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"authorization": f"Bearer {token}"},
+        )
+        agent_status, _, agent_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/agents/runs",
+            {"provider": "openai", "input": "hi"},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(chat_status, 200)
+        self.assertEqual(agent_status, 403)
+        self.assertEqual(loads_bytes(agent_body)["error"]["code"], "forbidden")
+
+    async def test_embeddings_route_proxies_caches_and_records_usage(self) -> None:
+        response = UpstreamResponse(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            body=dumps_bytes(
+                {
+                    "object": "list",
+                    "data": [{"object": "embedding", "embedding": [0.1, 0.2], "index": 0}],
+                    "usage": {"prompt_tokens": 4, "total_tokens": 4},
+                }
+            ),
+        )
+        http = FakeHttpClient(response)
+        resolved_settings = settings(JUSTFASTLLM_MASTER_KEY="master-key")
+        app = create_app(
+            settings=resolved_settings,
+            provider_factory=ProviderFactory(resolved_settings, http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60),
+            logger=logging.getLogger("test"),
+        )
+        _, _, key_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/keys",
+            {"name": "embedder", "models": ["text-embedding-3-small"], "allowed_routes": ["embeddings"], "budget_usd": 1},
+            headers={"authorization": "Bearer master-key"},
+        )
+        token = loads_bytes(key_body)["key"]
+        payload = {"provider": "openai", "model": "text-embedding-3-small", "input": "hello"}
+
+        first_status, first_headers, _ = await asgi_request(
+            app,
+            "POST",
+            "/v1/embeddings",
+            payload,
+            headers={"authorization": f"Bearer {token}"},
+        )
+        second_status, second_headers, _ = await asgi_request(
+            app,
+            "POST",
+            "/v1/embeddings",
+            payload,
+            headers={"authorization": f"Bearer {token}"},
+        )
+        chat_status, _, chat_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            {"provider": "openai", "model": "text-embedding-3-small", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"authorization": f"Bearer {token}"},
+        )
+        metrics_status, _, metrics_body = await asgi_request(
+            app,
+            "GET",
+            "/v1/metrics",
+            headers={"authorization": "Bearer master-key"},
+        )
+
+        self.assertEqual(first_status, 200)
+        self.assertEqual(first_headers["x-justfastllm-cache"], "miss")
+        self.assertEqual(second_status, 200)
+        self.assertEqual(second_headers["x-justfastllm-cache"], "hit")
+        self.assertEqual(len(http.requests), 1)
+        self.assertEqual(http.requests[0].url, "https://api.openai.com/v1/embeddings")
+        self.assertEqual(chat_status, 403)
+        self.assertEqual(loads_bytes(chat_body)["error"]["code"], "forbidden")
+        metrics = loads_bytes(metrics_body)
+        self.assertEqual(metrics_status, 200)
+        self.assertEqual(metrics["requests"], 2)
+        self.assertIn("text-embedding-3-small", metrics["by_model"])
+
+    async def test_audio_route_forwards_raw_multipart_body(self) -> None:
+        http = FakeHttpClient()
+        resolved_settings = settings()
+        app = create_app(
+            settings=resolved_settings,
+            provider_factory=ProviderFactory(resolved_settings, http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60),
+            logger=logging.getLogger("test"),
+        )
+        body = b"--boundary\r\ncontent\r\n--boundary--"
+
+        status, headers, _ = await asgi_request(
+            app,
+            "POST",
+            "/v1/audio/transcriptions",
+            None,
+            headers={
+                "content-type": "multipart/form-data; boundary=boundary",
+                "x-llm-provider": "openai",
+            },
+            raw_body=body,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-justfastllm-provider"], "openai")
+        self.assertEqual(http.requests[0].url, "https://api.openai.com/v1/audio/transcriptions")
+        self.assertEqual(http.requests[0].body, body)
+        self.assertEqual(http.requests[0].headers["Content-Type"], "multipart/form-data; boundary=boundary")
+
+    async def test_request_and_response_policies_are_enforced(self) -> None:
+        blocked_response_http = FakeHttpClient(
+            UpstreamResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=dumps_bytes({"choices": [{"message": {"content": "blocked phrase"}}]}),
+            )
+        )
+        blocked_request_settings = settings(
+            JUSTFASTLLM_POLICY_DENIED_MODELS="gpt-5-nano",
+            JUSTFASTLLM_POLICY_ALLOWED_PROVIDERS="openai",
+            JUSTFASTLLM_POLICY_REQUIRED_TAGS="prod",
+        )
+        blocked_request_app = create_app(
+            settings=blocked_request_settings,
+            provider_factory=ProviderFactory(blocked_request_settings, FakeHttpClient()),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+        blocked_response_settings = settings(JUSTFASTLLM_POLICY_RESPONSE_BLOCK_PATTERNS="blocked phrase")
+        blocked_response_app = create_app(
+            settings=blocked_response_settings,
+            provider_factory=ProviderFactory(blocked_response_settings, blocked_response_http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+
+        request_status, _, request_body = await asgi_request(
+            blocked_request_app,
+            "POST",
+            "/v1/chat/completions",
+            {"provider": "openai", "model": "gpt-5-nano", "tags": ["prod"], "messages": [{"role": "user", "content": "hi"}]},
+        )
+        response_status, _, response_body = await asgi_request(
+            blocked_response_app,
+            "POST",
+            "/v1/chat/completions",
+            {"provider": "openai", "model": "gpt-5-nano", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+        self.assertEqual(request_status, 403)
+        self.assertEqual(loads_bytes(request_body)["error"]["code"], "policy_violation")
+        self.assertEqual(response_status, 403)
+        self.assertEqual(loads_bytes(response_body)["error"]["code"], "policy_violation")
+
+    async def test_provider_health_and_alerts_are_derived_from_usage(self) -> None:
+        response = UpstreamResponse(
+            status_code=500,
+            headers={"content-type": "application/json"},
+            body=dumps_bytes({"error": {"message": "upstream failed"}}),
+        )
+        http = FakeHttpClient(response)
+        resolved_settings = settings(JUSTFASTLLM_MASTER_KEY="master-key")
+        app = create_app(
+            settings=resolved_settings,
+            provider_factory=ProviderFactory(resolved_settings, http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+        for _ in range(5):
+            await asgi_request(
+                app,
+                "POST",
+                "/v1/chat/completions",
+                {"provider": "openai", "model": "gpt-5-nano", "messages": [{"role": "user", "content": "hi"}]},
+                headers={"authorization": "Bearer master-key"},
+            )
+
+        health_status, _, health_body = await asgi_request(
+            app,
+            "GET",
+            "/v1/providers/health",
+            headers={"authorization": "Bearer master-key"},
+        )
+        alert_status, _, alert_body = await asgi_request(
+            app,
+            "GET",
+            "/v1/alerts",
+            headers={"authorization": "Bearer master-key"},
+        )
+
+        openai_health = next(item for item in loads_bytes(health_body)["data"] if item["provider"] == "openai")
+        self.assertEqual(health_status, 200)
+        self.assertEqual(openai_health["status"], "critical")
+        self.assertEqual(openai_health["errors"], 5)
+        self.assertEqual(alert_status, 200)
+        self.assertTrue(any(alert["type"] == "provider_error_rate" for alert in loads_bytes(alert_body)["data"]))
+
+    async def test_plugin_hooks_transform_request_and_response(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_path = Path(tmpdir) / "gateway_plugin.py"
+            plugin_path.write_text(
+                """
+def before_request(context, payload):
+    payload["plugin_request"] = context["route"]
+    return payload
+
+def after_response(context, payload):
+    payload["plugin_response"] = context["provider"]
+    return payload
+""".strip(),
+                encoding="utf-8",
+            )
+            sys.path.insert(0, tmpdir)
+            try:
+                http = FakeHttpClient()
+                resolved_settings = settings(JUSTFASTLLM_PLUGIN_MODULES="gateway_plugin")
+                app = create_app(
+                    settings=resolved_settings,
+                    provider_factory=ProviderFactory(resolved_settings, http),
+                    cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+                    logger=logging.getLogger("test"),
+                )
+                status, _, body = await asgi_request(
+                    app,
+                    "POST",
+                    "/v1/chat/completions",
+                    {"provider": "openai", "messages": [{"role": "user", "content": "hi"}]},
+                )
+            finally:
+                sys.path.remove(tmpdir)
+                sys.modules.pop("gateway_plugin", None)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(loads_bytes(http.requests[0].body)["plugin_request"], "chat")
+        self.assertEqual(loads_bytes(body)["plugin_response"], "openai")
+
+    async def test_config_reload_replaces_live_gateway_settings(self) -> None:
+        original = settings(JUSTFASTLLM_MASTER_KEY="master-key", JUSTFASTLLM_DEFAULT_PROVIDER="openai")
+        updated = settings(JUSTFASTLLM_MASTER_KEY="master-key", JUSTFASTLLM_DEFAULT_PROVIDER="ollama")
+        app = create_app(
+            settings=original,
+            provider_factory=ProviderFactory(original, FakeHttpClient()),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+
+        with patch("justfastllm.app.load_settings", return_value=updated):
+            status, _, body = await asgi_request(
+                app,
+                "POST",
+                "/v1/config/reload",
+                headers={"authorization": "Bearer master-key"},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(loads_bytes(body)["reloaded"])
+        self.assertEqual(app.settings.default_provider, "ollama")
+
+    async def test_proxy_control_users_teams_service_keys_and_aliases(self) -> None:
+        http = FakeHttpClient()
+        resolved_settings = settings(
+            JUSTFASTLLM_MASTER_KEY="master-key",
+            JUSTFASTLLM_KEY_HEADER_NAME="x-justfastllm-key",
+        )
+        app = create_app(
+            settings=resolved_settings,
+            provider_factory=ProviderFactory(resolved_settings, http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+        admin_headers = {"x-justfastllm-key": "master-key"}
+
+        user_status, _, _ = await asgi_request(
+            app,
+            "POST",
+            "/v1/proxy/users",
+            {"user_id": "user-1", "max_budget": 1, "models": ["gpt-5-nano"]},
+            headers=admin_headers,
+        )
+        team_status, _, _ = await asgi_request(
+            app,
+            "POST",
+            "/team/new",
+            {"team_id": "team-1", "max_budget": 1, "models": ["gpt-5-nano"]},
+            headers=admin_headers,
+        )
+        key_status, _, key_body = await asgi_request(
+            app,
+            "POST",
+            "/service_account/key/generate",
+            {
+                "name": "worker",
+                "user_id": "user-1",
+                "team_id": "team-1",
+                "models": ["gpt-5-nano"],
+                "aliases": {"fast": "gpt-5-nano"},
+                "budget_usd": 1,
+            },
+            headers=admin_headers,
+        )
+        token = loads_bytes(key_body)["key"]
+        chat_status, _, _ = await asgi_request(
+            app,
+            "POST",
+            "/v1/chat/completions",
+            {"provider": "openai", "model": "fast", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"x-justfastllm-key": token},
+        )
+        user_info_status, _, user_info_body = await asgi_request(
+            app,
+            "GET",
+            "/user/info?user_id=user-1",
+            headers=admin_headers,
+        )
+        team_info_status, _, team_info_body = await asgi_request(
+            app,
+            "POST",
+            "/team/info",
+            {"team_id": "team-1"},
+            headers=admin_headers,
+        )
+        metrics_status, _, metrics_body = await asgi_request(
+            app,
+            "GET",
+            "/v1/metrics",
+            headers=admin_headers,
+        )
+
+        self.assertEqual(user_status, 201)
+        self.assertEqual(team_status, 201)
+        self.assertEqual(key_status, 201)
+        self.assertEqual(chat_status, 200)
+        self.assertEqual(loads_bytes(http.requests[0].body)["model"], "gpt-5-nano")
+        self.assertEqual(user_info_status, 200)
+        self.assertEqual(len(loads_bytes(user_info_body)["keys"]), 1)
+        self.assertEqual(team_info_status, 200)
+        self.assertEqual(len(loads_bytes(team_info_body)["keys"]), 1)
+        metrics = loads_bytes(metrics_body)
+        self.assertEqual(metrics_status, 200)
+        self.assertEqual(metrics["users"]["count"], 1)
+        self.assertEqual(metrics["teams"]["count"], 1)
+
+    async def test_proxy_control_update_delete_and_audit_routes(self) -> None:
+        http = FakeHttpClient()
+        resolved_settings = settings(JUSTFASTLLM_MASTER_KEY="master-key")
+        app = create_app(
+            settings=resolved_settings,
+            provider_factory=ProviderFactory(resolved_settings, http),
+            cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+            logger=logging.getLogger("test"),
+        )
+        admin = {"authorization": "Bearer master-key"}
+
+        await asgi_request(app, "POST", "/user/new", {"user_id": "user-1", "max_budget": 1}, headers=admin)
+        await asgi_request(app, "POST", "/team/new", {"team_id": "team-1", "max_budget": 1}, headers=admin)
+        _, _, key_body = await asgi_request(
+            app,
+            "POST",
+            "/v1/keys",
+            {"name": "mutable", "models": ["*"], "allowed_routes": ["chat"], "budget_usd": 1},
+            headers=admin,
+        )
+        key_payload = loads_bytes(key_body)
+        key_preview = key_payload["preview"]
+
+        key_update_status, _, key_update_body = await asgi_request(
+            app,
+            "PATCH",
+            "/v1/keys/update",
+            {"key": key_preview, "disabled": True, "allowed_routes": ["embeddings"], "metadata": {"owner": "ops"}},
+            headers=admin,
+        )
+        user_update_status, _, user_update_body = await asgi_request(
+            app,
+            "POST",
+            "/user/update",
+            {"user_id": "user-1", "user_email": "ops@example.com", "max_budget": 2},
+            headers=admin,
+        )
+        team_update_status, _, team_update_body = await asgi_request(
+            app,
+            "POST",
+            "/team/update",
+            {"team_id": "team-1", "team_alias": "Ops", "max_budget": 3},
+            headers=admin,
+        )
+        audit_status, _, audit_body = await asgi_request(app, "GET", "/v1/audit", headers=admin)
+        user_delete_status, _, user_delete_body = await asgi_request(app, "POST", "/user/delete", {"user_id": "user-1"}, headers=admin)
+        team_delete_status, _, team_delete_body = await asgi_request(app, "DELETE", "/v1/proxy/teams?team_id=team-1", headers=admin)
+        key_delete_status, _, key_delete_body = await asgi_request(app, "DELETE", f"/v1/keys?key={key_preview}", headers=admin)
+
+        self.assertEqual(key_update_status, 200)
+        self.assertTrue(loads_bytes(key_update_body)["disabled"])
+        self.assertEqual(loads_bytes(key_update_body)["allowed_routes"], ["embeddings"])
+        self.assertEqual(user_update_status, 200)
+        self.assertEqual(loads_bytes(user_update_body)["user_email"], "ops@example.com")
+        self.assertEqual(team_update_status, 200)
+        self.assertEqual(loads_bytes(team_update_body)["team_alias"], "Ops")
+        self.assertEqual(audit_status, 200)
+        audit_actions = [event["action"] for event in loads_bytes(audit_body)["data"]]
+        self.assertIn("create", audit_actions)
+        self.assertIn("update", audit_actions)
+        self.assertEqual(user_delete_status, 200)
+        self.assertTrue(loads_bytes(user_delete_body)["deleted"])
+        self.assertEqual(team_delete_status, 200)
+        self.assertTrue(loads_bytes(team_delete_body)["deleted"])
+        self.assertEqual(key_delete_status, 200)
+        self.assertTrue(loads_bytes(key_delete_body)["deleted"])
+
+    async def test_proxy_control_state_persists_to_json_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "proxy-control.json"
+            first_http = FakeHttpClient()
+            first_settings = settings(
+                JUSTFASTLLM_MASTER_KEY="master-key",
+                JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH=str(state_path),
+            )
+            first_app = create_app(
+                settings=first_settings,
+                provider_factory=ProviderFactory(first_settings, first_http),
+                cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+                logger=logging.getLogger("test"),
+            )
+            await asgi_request(
+                first_app,
+                "POST",
+                "/user/new",
+                {"user_id": "user-1", "max_budget": 1},
+                headers={"authorization": "Bearer master-key"},
+            )
+            _, _, key_body = await asgi_request(
+                first_app,
+                "POST",
+                "/v1/keys",
+                {"name": "persisted", "user_id": "user-1", "models": ["*"], "budget_usd": 1},
+                headers={"authorization": "Bearer master-key"},
+            )
+            token = loads_bytes(key_body)["key"]
+            await asgi_request(
+                first_app,
+                "POST",
+                "/v1/chat/completions",
+                {"provider": "openai", "model": "gpt-5-nano", "messages": [{"role": "user", "content": "hi"}]},
+                headers={"authorization": f"Bearer {token}"},
+            )
+
+            second_http = FakeHttpClient()
+            second_settings = settings(
+                JUSTFASTLLM_MASTER_KEY="master-key",
+                JUSTFASTLLM_CONTROL_PLANE_STORAGE_PATH=str(state_path),
+            )
+            second_app = create_app(
+                settings=second_settings,
+                provider_factory=ProviderFactory(second_settings, second_http),
+                cache=MemoryResponseCache(max_items=10, ttl_seconds=60, enabled=False),
+                logger=logging.getLogger("test"),
+            )
+            keys_status, _, keys_body = await asgi_request(
+                second_app,
+                "GET",
+                "/v1/keys",
+                headers={"authorization": "Bearer master-key"},
+            )
+            chat_status, _, _ = await asgi_request(
+                second_app,
+                "POST",
+                "/v1/chat/completions",
+                {"provider": "openai", "model": "gpt-5-nano", "messages": [{"role": "user", "content": "again"}]},
+                headers={"authorization": f"Bearer {token}"},
+            )
+            user_status, _, user_body = await asgi_request(
+                second_app,
+                "GET",
+                "/user/info?user_id=user-1",
+                headers={"authorization": "Bearer master-key"},
+            )
+            audit_status, _, audit_body = await asgi_request(
+                second_app,
+                "GET",
+                "/v1/audit",
+                headers={"authorization": "Bearer master-key"},
+            )
+
+        self.assertEqual(keys_status, 200)
+        self.assertEqual(len(loads_bytes(keys_body)["data"]), 1)
+        self.assertEqual(chat_status, 200)
+        self.assertEqual(user_status, 200)
+        self.assertGreater(loads_bytes(user_body)["spend_usd"], 0)
+        self.assertEqual(audit_status, 200)
+        self.assertGreaterEqual(len(loads_bytes(audit_body)["data"]), 2)
 
     async def test_user_preferences_are_stored_and_injected_into_provider_messages(self) -> None:
         http = FakeHttpClient()

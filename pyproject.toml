@@ -10,8 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
-  { name = "Suhas Bhairav", email = "hello@suhasbhairav.com" },
-  { name = "justfastllm contributors" }
+  { name = "Suhas Bhairav", email = "hello@suhasbhairav.com" }
 ]
 keywords = ["llm", "gateway", "proxy", "openai", "anthropic", "deepseek", "grok", "qwen", "kimi", "ollama", "redis"]
 classifiers = [
@@ -26,6 +25,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
+  "PyYAML>=6.0",
   "uvicorn>=0.30",
 ]
 

@@ -1,0 +1,77 @@
+server:
+  host: 0.0.0.0
+  port: 8000
+  log_level: INFO
+
+gateway:
+  default_provider: openai
+  request_timeout_seconds: 60
+  max_body_bytes: 1048576
+  max_message_chars: 200000
+  cors_allow_origin: ""
+  redis_url: redis://localhost:6379/0
+  cache:
+    enabled: true
+    backend: redis
+    ttl_seconds: 60
+    max_items: 1024
+    redis_key_prefix: justfastllm:cache:
+  guardrails:
+    enabled: true
+    disabled: []
+    block_patterns: []
+  policies:
+    denied_models: []
+    allowed_providers: []
+    required_tags: []
+    max_prompt_tokens: 0
+    response_block_patterns: []
+  memory:
+    enabled: true
+    backend: redis
+    key_prefix: justfastllm:memory:
+  control_plane:
+    master_key: ""
+    key_header_name: authorization
+    storage_path: .justfastllm/proxy-control.json
+    fallback_providers: []
+    mirror_provider: ""
+
+providers:
+  openai:
+    api_key: ""
+    base_url: https://api.openai.com/v1
+    model: gpt-5-nano
+  anthropic:
+    api_key: ""
+    base_url: https://api.anthropic.com/v1
+    model: claude-sonnet-4-5
+  deepseek:
+    api_key: ""
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-chat
+  grok:
+    api_key: ""
+    base_url: https://api.x.ai/v1
+    model: grok-4.7
+  qwen:
+    api_key: ""
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    model: qwen-max
+  kimi:
+    api_key: ""
+    base_url: https://api.moonshot.ai/v1
+    model: kimi-k2.6
+  ollama:
+    api_key: ""
+    base_url: http://localhost:11434/v1
+    model: llama3.1
+
+custom_openai_compatible_providers:
+  - name: openrouter
+    api_key: ""
+    base_url: https://openrouter.ai/api/v1
+    model: openai/gpt-5-nano
+    requires_api_key: true
+
+plugins: []
